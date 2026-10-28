@@ -35,17 +35,17 @@ npm run preview
 
 ## Demo mode
 
-Demo mode is isolated in `src/data/demo.ts` and selected in `src/services/api.ts`. The UI visibly shows “Demo mode”, and the test lab says “TEXT DEMO” / “Text fallback mode”. It uses synthetic clinic data and a deterministic appointment confirmation.
+Demo mode is isolated in `src/data/demo.ts` and selected in `src/services/api.ts`. The UI visibly shows “Demo mode”, and the test lab says “TEXT DEMO” / “Text fallback mode”. It uses synthetic clinic data and a deterministic appointment confirmation. Created and edited demo agents persist in browser local storage under `vaanisetu.demo.agents`.
 
 ## Proposed backend contract
 
-These are integration interfaces, not assumptions that routes already exist:
+These are integration interfaces, not assumptions that routes already exist. The adjacent backend folder currently contains only a placeholder `app.py`, so these routes still require confirmation from Member 3:
 
 - `GET /agents`
 - `GET /agents/:id`
 - `POST /agents`
 - `PUT /agents/:id`
-- `POST /agents/:id/sessions` — should return a signed ElevenLabs conversation token/URL or session configuration.
+- `POST /agents/:id/sessions` — should return `{ sessionId, mode: "live", signedUrl? | conversationToken?, agentId? }`.
 - A session input endpoint, if needed by the agreed integration.
 - `GET /appointments/latest` or a session-results endpoint returning `{ status, patientName?, date?, time?, message }`.
 
@@ -53,16 +53,16 @@ Member 1 should confirm the ElevenLabs agent ID/configuration, language behavior
 
 ## Git handoff
 
-The project is designed to live in a repository named `vaanisetu-frontend`. Keep `.env` private; `.env.example` is committed. A team member with GitHub access can create/push the repository with:
+The shared repository is `vaanisetu`. Keep `.env` private; `.env.example` is committed. Changes should be made on a feature branch and pushed normally; never force-push shared history.
 
 ```bash
 gh auth login
-gh repo create vaanisetu-frontend --private --source . --remote origin
-git push -u origin main
+git checkout -b feat/your-change
+git push -u origin feat/your-change
 ```
 
 ## Limitations / next steps
 
-- Live ElevenLabs voice sessions require the backend-supplied token/session contract.
-- Backend error/loading handling can be expanded when response shapes are confirmed.
+- Live ElevenLabs voice sessions require the backend-supplied token/session contract. Official docs specify `Conversation.startSession({ signedUrl })` or `{ conversationToken }` for private agents; the API key must remain server-side.
+- `src/services/voiceSession.ts` is the intentionally inert adapter for that future SDK integration.
 - A backend-connected test should replace the deterministic text response once Member 1/3 provide the session and booking endpoints.
