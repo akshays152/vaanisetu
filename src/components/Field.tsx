@@ -1,0 +1,1 @@
+import type { ReactNode } from 'react'; export function Field({label,required,help,children}:{label:string;required?:boolean;help?:string;children:ReactNode}){return <label className="field"><span>{label}{required&&<b>*</b>}</span>{children}{help&&<small>{help}</small>}</label>}
