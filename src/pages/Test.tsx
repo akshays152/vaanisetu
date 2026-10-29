@@ -34,6 +34,17 @@ export function Test() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [booking, setBooking] = useState<BookingResult | null>(null);
+  const [sessionId, setSessionId] = useState<string>();
+  const [appointmentDate, setAppointmentDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    if (date.getDay() === 0) date.setDate(date.getDate() + 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  });
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState('');
+  const [bookingError, setBookingError] = useState('');
+  const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
   // Voice AI States
   const [isListening, setIsListening] = useState(false);
@@ -56,6 +67,24 @@ export function Test() {
   }, [id]);
 
   useEffect(() => {
+    let cancelled = false;
+    setSelectedSlot('');
+    setBookingError('');
+    api.getAvailableSlots(appointmentDate).then((result) => {
+      if (!cancelled) {
+        setAvailableSlots(result.availableSlots);
+        setSelectedSlot(result.availableSlots[0] || '');
+      }
+    }).catch((error: Error) => {
+      if (!cancelled) {
+        setAvailableSlots([]);
+        setBookingError(error.message);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [appointmentDate]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isSpeaking]);
 
@@ -69,7 +98,8 @@ export function Test() {
   }, [autoPlayTimer]);
 
   const startSession = async () => {
-    await api.startSession(id);
+    const session = await api.startSession(id);
+    setSessionId(session.sessionId);
     voiceSession.resetConversation();
     setActive(true);
     setCurrentStepIndex(0);
@@ -132,8 +162,21 @@ export function Test() {
 
       // If action is book_appointment, trigger backend persistence
       if (outcome.action === 'book_appointment' && outcome.bookingData) {
-        const saved = await api.getBooking();
-        setBooking({ ...saved, ...outcome.bookingData });
+        try {
+          if (!selectedSlot) throw new Error('Choose an available appointment time first.');
+          const saved = await api.bookAppointment({
+            patientName: outcome.bookingData.patientName || 'Sachin Sharma',
+            doctor: outcome.bookingData.doctorName || 'Dr. Ananya Mehta',
+            date: appointmentDate,
+            time: selectedSlot,
+            sessionId,
+          });
+          const confirmed = { ...outcome.bookingData, ...saved, date: appointmentDate, time: selectedSlot };
+          setBooking(confirmed);
+          setBookingError('');
+        } catch (error) {
+          setBookingError(error instanceof Error ? error.message : 'Could not save the appointment.');
+        }
       }
 
       // Voice Audio Response via ElevenLabs
@@ -506,6 +549,21 @@ export function Test() {
             </div>
           </div>
 
+          <div className="side-panel">
+            <h3>Choose an appointment</h3>
+            <label className="field">
+              <span>Date</span>
+              <input type="date" value={appointmentDate} min={localDate(new Date())} onChange={(event) => setAppointmentDate(event.target.value)} />
+            </label>
+            <small>Available times</small>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, borderTop: 0 }}>
+              {availableSlots.length ? availableSlots.map((slot) => (
+                <button key={slot} type="button" className={selectedSlot === slot ? 'primary-btn' : 'secondary-btn'} onClick={() => setSelectedSlot(slot)} style={{ padding: '7px 9px' }}>{slot}</button>
+              )) : <span className="muted">No available times for this date.</span>}
+            </div>
+            {bookingError && <p role="alert" className="booking-error">{bookingError}</p>}
+          </div>
+
           {/* Real Confirmed Booking Outcome Card */}
           {booking && (
             <div className="result-card">
@@ -518,7 +576,7 @@ export function Test() {
               <div className="result-doctor-badge">
                 <UserCheck size={13} /> {booking.doctorName || 'Dr. Ananya Mehta'}
               </div>
-              <Link to="/results">
+              <Link to="/results" state={{ booking }}>
                 View full booking receipt <ArrowLeft size={14} style={{ transform: 'rotate(180deg)' }} />
               </Link>
             </div>

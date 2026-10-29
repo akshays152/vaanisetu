@@ -68,19 +68,36 @@ Optional ElevenLabs variables for Member 1:
 
 Demo mode is isolated in `src/data/demo.ts` and selected in `src/services/api.ts`. The UI visibly shows “Demo mode”, and the test lab says “TEXT DEMO” / “Text fallback mode”. It uses synthetic clinic data and a deterministic appointment confirmation. Created and edited demo agents persist in browser local storage under `vaanisetu.demo.agents`.
 
-## Proposed backend contract
+## FastAPI backend
 
-These are integration interfaces, not assumptions that routes already exist. The adjacent backend folder currently contains only a placeholder `app.py`, so these routes still require confirmation from Member 3:
+The backend lives in `backend/app.py` and stores agents, sessions, and appointments in `backend/vaanisetu.db` (ignored by Git).
 
-- `GET /agents`
-- `GET /agents/:id`
-- `POST /agents`
-- `PUT /agents/:id`
-- `POST /agents/:id/sessions` — should return `{ sessionId, mode: "live", signedUrl? | conversationToken?, agentId? }`.
-- A session input endpoint, if needed by the agreed integration.
-- `GET /appointments/latest` or a session-results endpoint returning `{ status, patientName?, date?, time?, message }`.
+### Start the backend (Windows PowerShell)
 
-Member 1 has confirmed the ElevenLabs agent ID/configuration, language behavior, and voice synthesis layer in `src/services/elevenlabs.ts` and `src/services/voiceSession.ts`.
+Open a terminal in the repository root and run:
+
+```powershell
+py -3 -m venv backend/.venv
+.\backend\.venv\Scripts\Activate.ps1
+python -m pip install -r backend/requirements.txt
+python -m uvicorn app:app --reload --app-dir backend
+```
+
+Keep that terminal open. The API runs at `http://localhost:8000`; interactive API docs are at `http://localhost:8000/docs`. In a second terminal, run the frontend with `npm run dev`. Set `VITE_DEMO_MODE=false` in `.env` to use the API instead of browser demo data.
+
+### Routes
+
+- `GET /health` — health check.
+- `GET /agents` and `GET /agents/{id}` — list or read agents.
+- `POST /agents` and `PUT /agents/{id}` — create or update an agent.
+- `POST /agents/{id}/sessions` — create a demo session and return its `sessionId`.
+- `GET /appointments/slots?date=YYYY-MM-DD` — list unbooked clinic times for a date (clinic closed Sundays).
+- `POST /appointments` — save a confirmed appointment. JSON fields: `patientName`, `date`, `time`, optional `doctor`, and optional `sessionId`. Returns the saved appointment, or `409` if the selected slot was already booked.
+- `GET /appointments/latest` — return the most recently saved appointment.
+
+The appointment test flow is available in the Test page: choose a date and available time, complete the conversation confirmation, then open the booking receipt. The backend rejects past dates and unavailable times.
+
+Member 1's ElevenLabs voice and conversation work remains in `src/services/elevenlabs.ts` and `src/services/voiceSession.ts`. The current session endpoint creates local demo session records; live ElevenLabs signed-session credentials are not implemented here.
 
 ## Git handoff
 
@@ -96,4 +113,4 @@ git push -u origin feat/your-change
 
 - Live ElevenLabs voice sessions require the backend-supplied token/session contract. Official docs specify `Conversation.startSession({ signedUrl })` or `{ conversationToken }` for private agents; the API key must remain server-side.
 - `src/services/voiceSession.ts` connects the frontend to the ElevenLabs voice and conversational engine.
-- A backend-connected test should replace the deterministic text response once Member 1/3 provide the session and booking endpoints.
+- The FastAPI appointment and agent endpoints are available. Live ElevenLabs session tokens still need a server-side integration before the mic flow can use a hosted conversational agent.

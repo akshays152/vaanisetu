@@ -24,6 +24,7 @@ export type BookingResult = {
   time?: string;
   message: string;
   appointmentId?: string;
+  sessionId?: string;
 };
 
 export type TestSession = {

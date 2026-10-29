@@ -111,13 +111,13 @@ export class ClinicConversationEngine {
     // 3. Slot agreement or Name submission
     if (
       this.state.stage === 'offering_slot' ||
-      raw.includes('10:30') ||
-      raw.includes('tuesday') ||
+      (this.state.stage !== 'awaiting_confirmation' && raw.includes('10:30')) ||
+      (this.state.stage !== 'awaiting_confirmation' && (raw.includes('tuesday') ||
       raw.includes('morning') ||
       raw.includes('chalega') ||
       raw.includes('theek hai') ||
       raw.includes('ha') ||
-      raw.includes('yes')
+      raw.includes('yes')))
     ) {
       this.detectName(raw);
       this.state.stage = 'awaiting_confirmation';
