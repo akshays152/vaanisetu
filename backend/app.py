@@ -15,7 +15,9 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 
-DB_PATH = Path(__file__).with_name("vaanisetu.db")
+DB_PATH = Path(
+    os.getenv("VAANISETU_DB_PATH", str(Path(__file__).with_name("vaanisetu.db")))
+).resolve()
 load_dotenv(Path(__file__).with_name(".env"))
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID", "").strip()

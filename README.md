@@ -53,6 +53,14 @@ npm run build
 npm run preview
 ```
 
+Frontend quality checks:
+
+```powershell
+npm run lint
+npm test
+npm run build
+```
+
 ## Environment variables
 
 `VITE_API_BASE_URL` defaults to `http://localhost:8000`.
@@ -75,6 +83,7 @@ Demo mode is isolated in `src/data/demo.ts` and selected in `src/services/api.ts
 ## FastAPI backend
 
 The backend lives in `backend/app.py` and stores agents, sessions, and appointments in `backend/vaanisetu.db` (ignored by Git).
+Set `VAANISETU_DB_PATH` for an isolated test or local database without changing the default path.
 
 ### Start the backend (Windows PowerShell)
 
@@ -86,6 +95,12 @@ py -3 -m venv backend/.venv
 python -m pip install -r backend/requirements.txt
 # Copy `backend/.env.example` to `backend/.env` and fill in the backend-only values.
 python -m uvicorn app:app --reload --app-dir backend
+```
+
+Backend tests use a temporary database and do not modify `backend/vaanisetu.db`:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pytest backend\tests -q
 ```
 
 Keep that terminal open. The API runs at `http://localhost:8000`; interactive API docs are at `http://localhost:8000/docs`. In a second terminal, run the frontend with `npm run dev`. Set `VITE_DEMO_MODE=false` in `.env` to use the API instead of browser demo data.
