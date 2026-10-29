@@ -399,7 +399,7 @@ export function Test() {
                 </span>
               )}
               <span className="demo-tag">
-                {voiceConfig.apiKey ? 'ELEVENLABS LIVE' : 'VOICE SYNTHESIS ACTIVE'}
+                BROWSER SPEECH FALLBACK
               </span>
             </div>
           </div>
@@ -625,20 +625,9 @@ export function Test() {
 
             <div className="modal-body">
               <p className="modal-sub">
-                Connect your ElevenLabs API Key for real-time multilingual cloud synthesis, or use the
-                high-fidelity built-in speech engine.
+                Live ElevenLabs voice requires a backend-authorized session. This browser-only demo uses
+                speech synthesis and microphone recognition as a clearly labeled fallback.
               </p>
-
-              <label className="field-group">
-                <span>ElevenLabs API Key (Optional)</span>
-                <input
-                  type="password"
-                  placeholder="xi-api-key (e.g. 5f8a...)"
-                  value={voiceConfig.apiKey}
-                  onChange={(e) => handleSaveVoiceConfig({ apiKey: e.target.value })}
-                />
-                <small>Stored locally in your browser. Never exposed publicly.</small>
-              </label>
 
               <label className="field-group">
                 <span>Selected Voice</span>
