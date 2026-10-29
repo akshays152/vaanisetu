@@ -85,6 +85,9 @@ def initialize_db():
                 message TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS confirmed_appointment_slot
+            ON appointments (date, time) WHERE status = 'confirmed';
         """)
 
 
@@ -308,23 +311,26 @@ def book_appointment(payload: BookingInput):
                 detail="That appointment slot is already booked",
             )
 
-        db.execute(
-            """INSERT INTO appointments
-               (id, session_id, patient_name, doctor, date, time,
-                status, message, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                appointment["id"],
-                appointment["sessionId"],
-                appointment["patientName"],
-                appointment["doctor"],
-                appointment["date"],
-                appointment["time"],
-                appointment["status"],
-                appointment["message"],
-                appointment["createdAt"],
-            ),
-        )
+        try:
+            db.execute(
+                """INSERT INTO appointments
+                   (id, session_id, patient_name, doctor, date, time,
+                    status, message, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    appointment["id"],
+                    appointment["sessionId"],
+                    appointment["patientName"],
+                    appointment["doctor"],
+                    appointment["date"],
+                    appointment["time"],
+                    appointment["status"],
+                    appointment["message"],
+                    appointment["createdAt"],
+                ),
+            )
+        except sqlite3.IntegrityError as error:
+            raise HTTPException(status_code=409, detail="That appointment slot is already booked") from error
 
     return appointment
 

@@ -47,6 +47,7 @@ export function Test() {
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [selectedSlot, setSelectedSlot] = useState('');
   const [bookingError, setBookingError] = useState('');
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
   // Voice AI States
@@ -205,6 +206,8 @@ export function Test() {
 
       // If action is book_appointment, trigger backend persistence
       if (outcome.action === 'book_appointment' && outcome.bookingData) {
+        if (bookingSubmitting || booking) return;
+        setBookingSubmitting(true);
         try {
           if (!selectedSlot) throw new Error('Choose an available appointment time first.');
           const saved = await api.bookAppointment({
@@ -219,6 +222,8 @@ export function Test() {
           setBookingError('');
         } catch (error) {
           setBookingError(error instanceof Error ? error.message : 'Could not save the appointment.');
+        } finally {
+          setBookingSubmitting(false);
         }
       }
 
