@@ -3,7 +3,6 @@ import type { VoiceConfig } from '../types';
 const STORAGE_KEY = 'vaanisetu.elevenlabs.config';
 
 const DEFAULT_CONFIG: VoiceConfig = {
-  apiKey: import.meta.env.VITE_ELEVENLABS_API_KEY || '',
   agentId: import.meta.env.VITE_ELEVENLABS_AGENT_ID || 'clinic_receptionist_aarogya',
   voiceId: import.meta.env.VITE_ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM', // Riya
   modelId: 'eleven_multilingual_v2',
@@ -60,8 +59,8 @@ export class ElevenLabsService {
   }
 
   /**
-   * Speak response using ElevenLabs Multilingual TTS API if API key is present;
-   * otherwise fallback gracefully to browser SpeechSynthesis.
+   * Speak using the browser fallback. ElevenLabs credentials are server-side;
+   * live provider audio must be delivered through a backend-authorized session.
    */
   public async speak(
     text: string,
@@ -81,64 +80,7 @@ export class ElevenLabsService {
     this.isSpeaking = true;
     options?.onStart?.();
 
-    const voiceId = options?.voiceId || this.config.voiceId || '21m00Tcm4TlvDq8ikWAM';
-    const apiKey = this.config.apiKey.trim();
-
-    // If an ElevenLabs API key is configured, invoke ElevenLabs TTS API
-    if (apiKey) {
-      try {
-        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'xi-api-key': apiKey,
-          },
-          body: JSON.stringify({
-            text,
-            model_id: this.config.modelId || 'eleven_multilingual_v2',
-            voice_settings: {
-              stability: this.config.stability,
-              similarity_boost: this.config.similarityBoost,
-              style: 0.35,
-              use_speaker_boost: true,
-            },
-          }),
-        });
-
-        if (!response.ok) {
-          const errBody = await response.text();
-          throw new Error(`ElevenLabs API error (${response.status}): ${errBody || 'Voice synthesis failed'}`);
-        }
-
-        const blob = await response.blob();
-        const audioUrl = URL.createObjectURL(blob);
-        const audio = new Audio(audioUrl);
-        this.currentAudio = audio;
-
-        this.setupAudioAnalyser(audio);
-
-        audio.onended = () => {
-          this.isSpeaking = false;
-          options?.onEnd?.();
-          URL.revokeObjectURL(audioUrl);
-        };
-
-        audio.onerror = (e) => {
-          this.isSpeaking = false;
-          options?.onError?.(new Error('Audio playback failed'));
-          options?.onEnd?.();
-          URL.revokeObjectURL(audioUrl);
-        };
-
-        await audio.play();
-        return;
-      } catch (err: any) {
-        console.warn('ElevenLabs API request failed, falling back to Web Speech synthesis:', err.message);
-        // Fallback to browser SpeechSynthesis so demo never breaks!
-      }
-    }
-
-    // High quality browser Web Speech Synthesis fallback
+    // Browser SpeechSynthesis is intentionally a clearly labeled demo fallback.
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);

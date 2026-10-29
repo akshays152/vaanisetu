@@ -15,11 +15,10 @@ VaaniSetu is a polished React/Vite frontend for the “Voice AI for Everyone” 
 
 Member 1 handles the Voice AI, ElevenLabs integration, receptionist persona, and backup conversation testing:
 
-- **ElevenLabs Voice AI Service (`src/services/elevenlabs.ts`, `src/services/voiceSession.ts`)**:
-  - Implements ElevenLabs Multilingual speech synthesis using model `eleven_multilingual_v2`.
-  - Supports speech recognition (STT) via Web Speech API (`hi-IN` and `en-IN`) for live microphone conversations.
+- **Voice session boundary (`src/services/elevenlabs.ts`, `src/services/voiceSession.ts`)**:
+  - Keeps the frontend ready for an ElevenLabs agent session authorized by the backend.
+  - Uses browser SpeechSynthesis and Web Speech API only as an explicitly labeled demo fallback.
   - Curated Indian voices: `Riya` (Warm & clear Hindi/English receptionist, ID: `21m00Tcm4TlvDq8ikWAM`), `Arjun` (Calm & assured, ID: `pNInz6obpgDQGcFmaJgB`), and `Aditi` (Friendly & bright, ID: `EXAVITQu4vr4xnSDxMaL`).
-  - High-fidelity native speech fallback when an API key is not yet set, guaranteeing the voice always speaks during demos.
 
 - **Clinic Receptionist Agent Setup & Instructions (`src/data/clinicReceptionist.ts`)**:
   - Complete system instructions for **"Aarogya Clinic Receptionist"** (आरोग्य क्लिनिक रिसेप्शनिस्ट).
@@ -54,15 +53,28 @@ npm run build
 npm run preview
 ```
 
+Frontend quality checks:
+
+```powershell
+npm run lint
+npm test
+npm run build
+```
+
 ## Environment variables
 
 `VITE_API_BASE_URL` defaults to `http://localhost:8000`.
-`VITE_DEMO_MODE` defaults to `true`. Set it to `false` only after the backend contract is available. Never put an ElevenLabs API key, signed-session secret, or other server-side secret in a `VITE_` variable.
+`VITE_DEMO_MODE` defaults to `true`. Set it to `false` after the backend is running and configured. Never put an ElevenLabs API key, signed-session secret, or other server-side secret in a `VITE_` variable.
 
-Optional ElevenLabs variables for Member 1:
-- `VITE_ELEVENLABS_API_KEY`: ElevenLabs API key for direct cloud synthesis (optional, has fallback).
-- `VITE_ELEVENLABS_AGENT_ID`: Agent ID for conversational agent sessions.
-- `VITE_ELEVENLABS_VOICE_ID`: Voice ID (defaults to `21m00Tcm4TlvDq8ikWAM` - Riya).
+Public frontend variables:
+- `VITE_ELEVENLABS_AGENT_ID`: public display/default agent ID only.
+- `VITE_ELEVENLABS_VOICE_ID`: public display/default voice ID only.
+
+The ElevenLabs API key is never a frontend variable. Configure `ELEVENLABS_API_KEY` and
+`ELEVENLABS_AGENT_ID` in `backend/.env` or the server environment. The backend requests a short-lived
+signed URL from `GET https://api.elevenlabs.io/v1/convai/conversation/get-signed-url` and returns only
+that URL to the browser. The frontend starts the verified SDK session with
+`Conversation.startSession({ signedUrl })`.
 
 ## Demo mode
 
@@ -71,6 +83,7 @@ Demo mode is isolated in `src/data/demo.ts` and selected in `src/services/api.ts
 ## FastAPI backend
 
 The backend lives in `backend/app.py` and stores agents, sessions, and appointments in `backend/vaanisetu.db` (ignored by Git).
+Set `VAANISETU_DB_PATH` for an isolated test or local database without changing the default path.
 
 ### Start the backend (Windows PowerShell)
 
@@ -80,7 +93,14 @@ Open a terminal in the repository root and run:
 py -3 -m venv backend/.venv
 .\backend\.venv\Scripts\Activate.ps1
 python -m pip install -r backend/requirements.txt
+# Copy `backend/.env.example` to `backend/.env` and fill in the backend-only values.
 python -m uvicorn app:app --reload --app-dir backend
+```
+
+Backend tests use a temporary database and do not modify `backend/vaanisetu.db`:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pytest backend\tests -q
 ```
 
 Keep that terminal open. The API runs at `http://localhost:8000`; interactive API docs are at `http://localhost:8000/docs`. In a second terminal, run the frontend with `npm run dev`. Set `VITE_DEMO_MODE=false` in `.env` to use the API instead of browser demo data.
@@ -90,14 +110,14 @@ Keep that terminal open. The API runs at `http://localhost:8000`; interactive AP
 - `GET /health` — health check.
 - `GET /agents` and `GET /agents/{id}` — list or read agents.
 - `POST /agents` and `PUT /agents/{id}` — create or update an agent.
-- `POST /agents/{id}/sessions` — create a demo session and return its `sessionId`.
+- `POST /agents/{id}/sessions` — create a persisted session. In configured live mode it requests a short-lived ElevenLabs signed URL server-side and returns `{ sessionId, mode: "live", signedUrl, agentId }`; missing provider configuration returns `503` instead of pretending the session is live.
 - `GET /appointments/slots?date=YYYY-MM-DD` — list unbooked clinic times for a date (clinic closed Sundays).
 - `POST /appointments` — save a confirmed appointment. JSON fields: `patientName`, `date`, `time`, optional `doctor`, and optional `sessionId`. Returns the saved appointment, or `409` if the selected slot was already booked.
 - `GET /appointments/latest` — return the most recently saved appointment.
 
 The appointment test flow is available in the Test page: choose a date and available time, complete the conversation confirmation, then open the booking receipt. The backend rejects past dates and unavailable times.
 
-Member 1's ElevenLabs voice and conversation work remains in `src/services/elevenlabs.ts` and `src/services/voiceSession.ts`. The current session endpoint creates local demo session records; live ElevenLabs signed-session credentials are not implemented here.
+Member 1's persona and conversation fallback work remains in `src/services/elevenlabs.ts`, `src/services/voiceSession.ts`, and `src/services/conversationEngine.ts`. The live session boundary uses `@elevenlabs/client`; the backend owns the API key and signed-URL request.
 
 ## Git handoff
 
@@ -111,6 +131,6 @@ git push -u origin feat/your-change
 
 ## Limitations / next steps
 
-- Live ElevenLabs voice sessions require the backend-supplied token/session contract. Official docs specify `Conversation.startSession({ signedUrl })` or `{ conversationToken }` for private agents; the API key must remain server-side.
-- `src/services/voiceSession.ts` connects the frontend to the ElevenLabs voice and conversational engine.
+- Live ElevenLabs voice sessions use the official `@elevenlabs/client` package and `Conversation.startSession({ signedUrl })`; the API key remains server-side.
+- `src/services/voiceSession.ts` owns the frontend SDK lifecycle and fallback behavior. Live mode never silently falls back to scripted browser speech after a session-start failure.
 - The FastAPI appointment and agent endpoints are available. Live ElevenLabs session tokens still need a server-side integration before the mic flow can use a hosted conversational agent.
