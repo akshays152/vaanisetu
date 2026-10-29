@@ -3,14 +3,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 import json
+import os
 import sqlite3
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from dotenv import load_dotenv
 
 
 DB_PATH = Path(__file__).with_name("vaanisetu.db")
+load_dotenv(Path(__file__).with_name(".env"))
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
+ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID", "").strip()
+ELEVENLABS_SIGNED_URL_ENDPOINT = "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url"
+CORS_ORIGINS = [origin.strip() for origin in os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173",
+).split(",") if origin.strip()]
 
 AVAILABLE_SLOTS = [
     "10:00 AM",
@@ -85,13 +98,7 @@ app = FastAPI(title="VaaniSetu API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:4173",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -125,7 +132,43 @@ def row_to_agent(row):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "VaaniSetu API"}
+    return {
+        "status": "ok",
+        "service": "VaaniSetu API",
+        "elevenLabs": {
+            "configured": bool(ELEVENLABS_API_KEY and ELEVENLABS_AGENT_ID),
+            "agentConfigured": bool(ELEVENLABS_AGENT_ID),
+        },
+    }
+
+
+def get_elevenlabs_signed_url() -> str:
+    if not ELEVENLABS_API_KEY or not ELEVENLABS_AGENT_ID:
+        raise HTTPException(
+            status_code=503,
+            detail="Live ElevenLabs voice is not configured on the server",
+        )
+    if not (ELEVENLABS_AGENT_ID.startswith("agent_") or ELEVENLABS_AGENT_ID.startswith("seng_")):
+        raise HTTPException(status_code=503, detail="The configured ElevenLabs agent ID is invalid")
+
+    query = urlencode({"agent_id": ELEVENLABS_AGENT_ID})
+    request = Request(
+        f"{ELEVENLABS_SIGNED_URL_ENDPOINT}?{query}",
+        headers={"xi-api-key": ELEVENLABS_API_KEY, "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        raise HTTPException(status_code=502, detail="ElevenLabs authorization failed") from error
+    except (URLError, TimeoutError, json.JSONDecodeError):
+        raise HTTPException(status_code=502, detail="ElevenLabs authorization is unavailable")
+
+    signed_url = payload.get("signed_url") if isinstance(payload, dict) else None
+    if not isinstance(signed_url, str) or not signed_url.startswith("wss://"):
+        raise HTTPException(status_code=502, detail="ElevenLabs returned an invalid session authorization")
+    return signed_url
 
 
 @app.get("/agents")
@@ -202,7 +245,13 @@ def start_session(agent_id: str):
             (session_id, agent_id, datetime.now(timezone.utc).isoformat()),
         )
 
-    return {"sessionId": session_id, "mode": "demo", "agentId": agent_id}
+    signed_url = get_elevenlabs_signed_url()
+    return {
+        "sessionId": session_id,
+        "mode": "live",
+        "signedUrl": signed_url,
+        "agentId": ELEVENLABS_AGENT_ID,
+    }
 
 
 @app.get("/appointments/slots")

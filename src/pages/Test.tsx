@@ -35,6 +35,9 @@ export function Test() {
   const [input, setInput] = useState('');
   const [booking, setBooking] = useState<BookingResult | null>(null);
   const [sessionId, setSessionId] = useState<string>();
+  const [sessionMode, setSessionMode] = useState<'demo' | 'live'>('demo');
+  const [sessionStatus, setSessionStatus] = useState('idle');
+  const [sessionError, setSessionError] = useState('');
   const [appointmentDate, setAppointmentDate] = useState(() => {
     const date = new Date();
     date.setDate(date.getDate() + 1);
@@ -93,37 +96,67 @@ export function Test() {
     return () => {
       voiceSession.stopAudio();
       voiceSession.stopListening();
+      void voiceSession.endLiveSession();
       if (autoPlayTimer) clearTimeout(autoPlayTimer);
     };
   }, [autoPlayTimer]);
 
   const startSession = async () => {
-    const session = await api.startSession(id);
-    setSessionId(session.sessionId);
-    voiceSession.resetConversation();
-    setActive(true);
-    setCurrentStepIndex(0);
+    if (active || sessionStatus === 'connecting') return;
+    setSessionError('');
+    setSessionStatus('connecting');
+    try {
+      const session = await api.startSession(id);
+      setSessionId(session.sessionId);
+      voiceSession.resetConversation();
+      setCurrentStepIndex(0);
 
-    const greeting =
-      agent?.greeting ||
-      'Namaste! Aarogya Clinic mein aapka swagat hai. Main aapki kya sahayata kar sakti hoon? How can I help you today?';
+      if (session.mode === 'live') {
+        await voiceSession.startLiveSession(session, {
+          onStatusChange: (status) => {
+            setSessionStatus(status);
+            if (status === 'connected') setActive(true);
+            if (status === 'disconnected') setActive(false);
+          },
+          onModeChange: (mode) => {
+            setIsSpeaking(mode === 'speaking');
+            setIsListening(mode === 'listening');
+          },
+          onMessage: (message) => setMessages((previous) => [...previous, {
+            id: `${message.event_id}-${message.source}`,
+            from: message.source === 'ai' ? 'agent' : 'you',
+            text: message.message,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }]),
+          onError: (message) => {
+            setSessionError(message);
+            setSessionStatus('error');
+            setActive(false);
+          },
+        });
+        setSessionMode('live');
+        setMessages([]);
+        return;
+      }
 
-    const greetingMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      from: 'agent',
-      text: greeting,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages([greetingMsg]);
-
-    if (speechEnabled) {
-      setIsSpeaking(true);
-      await voiceSession.speak(greeting, () => setIsSpeaking(false));
+      setSessionMode('demo');
+      setSessionStatus('connected');
+      setActive(true);
+      const greeting = agent?.greeting || 'Namaste! Aarogya Clinic mein aapka swagat hai. How can I help you today?';
+      setMessages([{ id: crypto.randomUUID(), from: 'agent', text: greeting, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      if (speechEnabled) {
+        setIsSpeaking(true);
+        await voiceSession.speak(greeting, () => setIsSpeaking(false));
+      }
+    } catch (error) {
+      setSessionStatus('error');
+      setActive(false);
+      setSessionError(error instanceof Error ? error.message : 'Could not start the voice session.');
     }
   };
 
-  const endSession = () => {
+  const endSession = async () => {
+    await voiceSession.endLiveSession();
     voiceSession.stopAudio();
     voiceSession.stopListening();
     if (autoPlayTimer) clearTimeout(autoPlayTimer);
@@ -131,6 +164,7 @@ export function Test() {
     setIsListening(false);
     setIsSpeaking(false);
     setActive(false);
+    setSessionStatus('disconnected');
   };
 
   const handleSendMessage = async (textToSend?: string) => {
@@ -146,6 +180,15 @@ export function Test() {
     };
 
     setMessages((prev) => [...prev, userMsg]);
+
+    if (sessionMode === 'live') {
+      try {
+        voiceSession.sendLiveMessage(text);
+      } catch (error) {
+        setSessionError(error instanceof Error ? error.message : 'The live session is unavailable.');
+      }
+      return;
+    }
 
     // Process through Receptionist Conversational Engine
     const outcome = voiceSession.processMessage(text);
@@ -189,6 +232,7 @@ export function Test() {
 
   // Toggle Live Microphone Listening
   const toggleListening = () => {
+    if (sessionMode === 'live') return;
     if (isListening) {
       voiceSession.stopListening();
       setIsListening(false);
@@ -324,10 +368,14 @@ export function Test() {
           </button>
           <div className={`connection ${active ? 'connected' : ''}`}>
             <i />
-            {active ? 'Session active · ElevenLabs Ready' : 'Ready to connect'}
+            {active
+              ? sessionMode === 'live' ? 'Live ElevenLabs · Connected' : 'Demo session · Browser fallback'
+              : sessionStatus === 'connecting' ? 'Connecting…' : 'Ready to connect'}
           </div>
         </div>
       </div>
+
+      {sessionError && <div className="error-banner" role="alert">{sessionError}</div>}
 
       {/* Backup Demo Script Quick-Bar */}
       <div className="demo-script-banner">
@@ -399,7 +447,7 @@ export function Test() {
                 </span>
               )}
               <span className="demo-tag">
-                BROWSER SPEECH FALLBACK
+                {sessionMode === 'live' ? 'ELEVENLABS LIVE' : 'BROWSER SPEECH FALLBACK'}
               </span>
             </div>
           </div>
@@ -522,7 +570,7 @@ export function Test() {
 
             <span>
               <Volume2 size={14} />{' '}
-              {speechEnabled ? 'ElevenLabs Voice Output: Active' : 'Voice Audio: Muted'}
+              {sessionMode === 'live' ? 'ElevenLabs session audio' : speechEnabled ? 'Browser speech fallback' : 'Voice audio muted'}
             </span>
           </div>
         </section>
