@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.stubEnv('VITE_DEMO_MODE', 'true');
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {
