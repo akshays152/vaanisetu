@@ -47,18 +47,6 @@ export type VoiceConfig = {
   speechEnabled: boolean;
 };
 
-export type DemoScriptStep = {
-  id: number;
-  title: string;
-  userPrompt: string;
-  userPromptHindi: string;
-  agentResponse: string;
-  agentResponseHindi: string;
-  intent: 'greeting' | 'inquiry' | 'slot_selection' | 'confirmation' | 'completed';
-  triggersBooking?: boolean;
-  notes: string;
-};
-
 export type ChatMessage = {
   id: string;
   from: 'agent' | 'you';

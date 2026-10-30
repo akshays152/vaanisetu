@@ -3,20 +3,12 @@ import {
   CheckCircle2,
   Mic,
   MicOff,
-  RotateCcw,
   Send,
   Square,
   Volume2,
   VolumeX,
   Settings as SettingsIcon,
-  Sparkles,
-  FileText,
-  Play,
-  Pause,
   Radio,
-  ExternalLink,
-  Info,
-  Clock,
   UserCheck,
 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
@@ -24,7 +16,7 @@ import { useEffect, useState, useRef } from 'react';
 import { api } from '../services/api';
 import { voiceSession } from '../services/voiceSession';
 import { elevenLabsService } from '../services/elevenlabs';
-import { BACKUP_DEMO_SCRIPT, ELEVENLABS_VOICES } from '../data/clinicReceptionist';
+import { ELEVENLABS_VOICES } from '../data/clinicReceptionist';
 import type { Agent, BookingResult, ChatMessage, VoiceConfig } from '../types';
 
 export function Test() {
@@ -44,6 +36,8 @@ export function Test() {
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [selectedSlot, setSelectedSlot] = useState('');
   const [bookingError, setBookingError] = useState('');
+  const [loadingSlots, setLoadingSlots] = useState(true);
+  const [slotRefresh, setSlotRefresh] = useState(0);
   const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
   // Voice AI States
@@ -52,13 +46,6 @@ export function Test() {
   const [speechEnabled, setSpeechEnabled] = useState(true);
   const [voiceConfig, setVoiceConfig] = useState<VoiceConfig>(elevenLabsService.getConfig());
   const [showConfig, setShowConfig] = useState(false);
-  const [showScriptModal, setShowScriptModal] = useState(false);
-  const [showPromptModal, setShowPromptModal] = useState(false);
-
-  // Backup Script Player
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [isAutoPlaying, setIsAutoPlaying] = useState(false);
-  const [autoPlayTimer, setAutoPlayTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +57,7 @@ export function Test() {
     let cancelled = false;
     setSelectedSlot('');
     setBookingError('');
+    setLoadingSlots(true);
     api.getAvailableSlots(appointmentDate).then((result) => {
       if (!cancelled) {
         setAvailableSlots(result.availableSlots);
@@ -80,9 +68,11 @@ export function Test() {
         setAvailableSlots([]);
         setBookingError(error.message);
       }
+    }).finally(() => {
+      if (!cancelled) setLoadingSlots(false);
     });
     return () => { cancelled = true; };
-  }, [appointmentDate]);
+  }, [appointmentDate, slotRefresh]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -93,16 +83,14 @@ export function Test() {
     return () => {
       voiceSession.stopAudio();
       voiceSession.stopListening();
-      if (autoPlayTimer) clearTimeout(autoPlayTimer);
     };
-  }, [autoPlayTimer]);
+  }, []);
 
   const startSession = async () => {
     const session = await api.startSession(id);
     setSessionId(session.sessionId);
     voiceSession.resetConversation();
     setActive(true);
-    setCurrentStepIndex(0);
 
     const greeting =
       agent?.greeting ||
@@ -126,8 +114,6 @@ export function Test() {
   const endSession = () => {
     voiceSession.stopAudio();
     voiceSession.stopListening();
-    if (autoPlayTimer) clearTimeout(autoPlayTimer);
-    setIsAutoPlaying(false);
     setIsListening(false);
     setIsSpeaking(false);
     setActive(false);
@@ -164,8 +150,10 @@ export function Test() {
       if (outcome.action === 'book_appointment' && outcome.bookingData) {
         try {
           if (!selectedSlot) throw new Error('Choose an available appointment time first.');
+          const patientName = outcome.bookingData.patientName?.trim();
+          if (!patientName) throw new Error('Please collect the patient’s name before confirming.');
           const saved = await api.bookAppointment({
-            patientName: outcome.bookingData.patientName || 'Sachin Sharma',
+            patientName,
             doctor: outcome.bookingData.doctorName || 'Dr. Ananya Mehta',
             date: appointmentDate,
             time: selectedSlot,
@@ -175,7 +163,7 @@ export function Test() {
           setBooking(confirmed);
           setBookingError('');
         } catch (error) {
-          setBookingError(error instanceof Error ? error.message : 'Could not save the appointment.');
+          setBookingError(error instanceof Error ? error.message : 'We couldn’t save the appointment. Please try again.');
         }
       }
 
@@ -221,57 +209,6 @@ export function Test() {
     }
   };
 
-  // Run a specific step from the Backup Demo Script
-  const executeScriptStep = async (stepIndex: number) => {
-    if (!active) {
-      await startSession();
-    }
-    const step = BACKUP_DEMO_SCRIPT[stepIndex];
-    if (!step) return;
-
-    setCurrentStepIndex(stepIndex + 1);
-
-    if (step.intent === 'greeting') {
-      // Just re-speak greeting if needed
-      if (speechEnabled) {
-        setIsSpeaking(true);
-        await voiceSession.speak(step.agentResponse, () => setIsSpeaking(false));
-      }
-      return;
-    }
-
-    handleSendMessage(step.userPrompt);
-  };
-
-  // Auto-Play complete verified demo sequence
-  const startAutoPlay = async () => {
-    if (isAutoPlaying) {
-      if (autoPlayTimer) clearTimeout(autoPlayTimer);
-      setIsAutoPlaying(false);
-      return;
-    }
-
-    setIsAutoPlaying(true);
-    if (!active) {
-      await startSession();
-    }
-
-    let current = 1;
-    const playNext = () => {
-      if (current >= BACKUP_DEMO_SCRIPT.length) {
-        setIsAutoPlaying(false);
-        return;
-      }
-      executeScriptStep(current);
-      current++;
-      const timer = setTimeout(playNext, 4500);
-      setAutoPlayTimer(timer);
-    };
-
-    const firstTimer = setTimeout(playNext, 2000);
-    setAutoPlayTimer(firstTimer);
-  };
-
   const handleSaveVoiceConfig = (updates: Partial<VoiceConfig>) => {
     const updated = elevenLabsService.saveConfig(updates);
     setVoiceConfig(updated);
@@ -298,23 +235,15 @@ export function Test() {
       <div className="test-head">
         <div>
           <div className="eyebrow">
-            <Radio size={13} className="pulse-icon" /> MEMBER 1 · ELEVENLABS VOICE AI & TEST LAB
+            <Radio size={13} className="pulse-icon" /> VOICE ASSISTANT
           </div>
           <h1>Have a conversation.</h1>
           <p>
-            Talk live to <strong>{agent?.name || 'Aarogya Clinic Receptionist'}</strong> in Hindi &
-            English, or test with the backup demo script.
+            Speak naturally with <strong>{agent?.name || 'Aarogya Clinic Receptionist'}</strong> in Hindi and English.
           </p>
         </div>
 
         <div className="head-right-actions">
-          <button
-            className="secondary-btn small-btn"
-            onClick={() => setShowPromptModal(true)}
-            title="Inspect Agent Instructions & Knowledge Base"
-          >
-            <FileText size={15} /> Agent Instructions
-          </button>
           <button
             className="secondary-btn small-btn"
             onClick={() => setShowConfig(!showConfig)}
@@ -324,50 +253,9 @@ export function Test() {
           </button>
           <div className={`connection ${active ? 'connected' : ''}`}>
             <i />
-            {active ? 'Session active · ElevenLabs Ready' : 'Ready to connect'}
+            {active ? 'Conversation active' : 'Ready when you are'}
           </div>
         </div>
-      </div>
-
-      {/* Backup Demo Script Quick-Bar */}
-      <div className="demo-script-banner">
-        <div className="banner-info">
-          <span className="badge-member">MEMBER 1 VERIFIED SCRIPT</span>
-          <strong>Fail-Safe Backup Demo Script</strong>
-          <span className="banner-sub">
-            Guaranteed 100% flawless presentation flow for judges & team.
-          </span>
-        </div>
-        <div className="banner-controls">
-          <button
-            className={`autoplay-btn ${isAutoPlaying ? 'playing' : ''}`}
-            onClick={startAutoPlay}
-          >
-            {isAutoPlaying ? <Pause size={14} /> : <Play size={14} />}
-            {isAutoPlaying ? 'Pause Auto-Play' : 'Auto-Run Complete Demo'}
-          </button>
-          <button
-            className="text-link-btn"
-            onClick={() => setShowScriptModal(true)}
-          >
-            View Script Cheatsheet <ExternalLink size={12} />
-          </button>
-        </div>
-      </div>
-
-      {/* Step Pills for 1-Click Interactive Demo */}
-      <div className="script-steps-pills">
-        {BACKUP_DEMO_SCRIPT.map((step, idx) => (
-          <button
-            key={step.id}
-            className={`script-step-pill ${currentStepIndex === idx + 1 ? 'current' : ''}`}
-            onClick={() => executeScriptStep(idx)}
-            title={`${step.userPrompt} -> ${step.agentResponse}`}
-          >
-            <span className="pill-num">0{step.id}</span>
-            <span className="pill-title">{step.title}</span>
-          </button>
-        ))}
       </div>
 
       <div className="test-layout">
@@ -399,7 +287,7 @@ export function Test() {
                 </span>
               )}
               <span className="demo-tag">
-                {voiceConfig.apiKey ? 'ELEVENLABS LIVE' : 'VOICE SYNTHESIS ACTIVE'}
+                {voiceConfig.apiKey ? 'VOICE READY' : 'DEVICE VOICE'}
               </span>
             </div>
           </div>
@@ -412,15 +300,11 @@ export function Test() {
                 </div>
                 <h3>Start bilingual voice conversation</h3>
                 <p>
-                  Experience the receptionist speaking in natural Hindi & English. You can speak into
-                  your microphone, use the keyboard, or click the 1-click backup script buttons.
+                  Talk with the receptionist using your microphone or by typing a message. You can switch between Hindi and English.
                 </p>
                 <div className="empty-actions">
                   <button className="primary-btn" onClick={startSession}>
                     <Mic size={17} /> Start Voice Session
-                  </button>
-                  <button className="secondary-btn" onClick={startAutoPlay}>
-                    <Play size={15} /> Run Backup Demo
                   </button>
                 </div>
               </div>
@@ -522,7 +406,7 @@ export function Test() {
 
             <span>
               <Volume2 size={14} />{' '}
-              {speechEnabled ? 'ElevenLabs Voice Output: Active' : 'Voice Audio: Muted'}
+              {speechEnabled ? 'Voice responses on' : 'Voice responses muted'}
             </span>
           </div>
         </section>
@@ -543,10 +427,6 @@ export function Test() {
               <small>ELEVENLABS VOICE</small>
               <strong>{voiceConfig.voiceId === '21m00Tcm4TlvDq8ikWAM' ? 'Riya — Warm & clear' : 'Custom Voice'}</strong>
             </div>
-            <div>
-              <small>MODEL</small>
-              <strong>eleven_multilingual_v2</strong>
-            </div>
           </div>
 
           <div className="side-panel">
@@ -557,11 +437,16 @@ export function Test() {
             </label>
             <small>Available times</small>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, borderTop: 0 }}>
-              {availableSlots.length ? availableSlots.map((slot) => (
+              {loadingSlots ? <span className="muted">Checking available times…</span> : availableSlots.length ? availableSlots.map((slot) => (
                 <button key={slot} type="button" className={selectedSlot === slot ? 'primary-btn' : 'secondary-btn'} onClick={() => setSelectedSlot(slot)} style={{ padding: '7px 9px' }}>{slot}</button>
-              )) : <span className="muted">No available times for this date.</span>}
+              )) : bookingError ? (
+                <div className="slot-error" role="alert">
+                  <span>We couldn’t load appointment times.</span>
+                  <button type="button" onClick={() => setSlotRefresh((value) => value + 1)}>Try again</button>
+                </div>
+              ) : <span className="muted">No times are available on this date. Try another day.</span>}
             </div>
-            {bookingError && <p role="alert" className="booking-error">{bookingError}</p>}
+            {bookingError && availableSlots.length > 0 && <p role="alert" className="booking-error">{bookingError}</p>}
           </div>
 
           {/* Real Confirmed Booking Outcome Card */}
@@ -571,7 +456,7 @@ export function Test() {
               <small>VERIFIED BOOKING OUTCOME</small>
               <h3>{booking.date}</h3>
               <p>
-                {booking.time} · {booking.patientName || 'Sachin Sharma'}
+                {booking.time} · {booking.patientName || '—'}
               </p>
               <div className="result-doctor-badge">
                 <UserCheck size={13} /> {booking.doctorName || 'Dr. Ananya Mehta'}
@@ -582,30 +467,6 @@ export function Test() {
             </div>
           )}
 
-          <div className="help-card">
-            <h3>Member 1 Checklist</h3>
-            <ul className="member-checklist">
-              <li>
-                <CheckCircle2 size={14} className="check-ok" /> ElevenLabs Voice AI Layer
-              </li>
-              <li>
-                <CheckCircle2 size={14} className="check-ok" /> Clinic Receptionist Prompt
-              </li>
-              <li>
-                <CheckCircle2 size={14} className="check-ok" /> Bilingual Hindi-English Audio
-              </li>
-              <li>
-                <CheckCircle2 size={14} className="check-ok" /> Backup Demo Script Ready
-              </li>
-            </ul>
-            <button
-              className="text-link-btn"
-              onClick={() => setShowScriptModal(true)}
-              style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}
-            >
-              Open Backup Script <ExternalLink size={12} />
-            </button>
-          </div>
         </aside>
       </div>
 
@@ -682,110 +543,6 @@ export function Test() {
         </div>
       )}
 
-      {/* Backup Demo Script Cheatsheet Modal */}
-      {showScriptModal && (
-        <div className="modal-backdrop" onClick={() => setShowScriptModal(false)}>
-          <div className="modal-card wide" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <div>
-                <span className="eyebrow">MEMBER 1 · DEMO CHEATSHEET</span>
-                <h2>Backup Demo Script Walkthrough</h2>
-              </div>
-              <button className="icon-close-btn" onClick={() => setShowScriptModal(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <p className="modal-sub">
-                This exact sequence demonstrates the end-to-end journey: greeting in Hindi/English →
-                patient inquiry → slot proposal → confirmation & real booking.
-              </p>
-
-              <div className="script-table">
-                {BACKUP_DEMO_SCRIPT.map((step) => (
-                  <div className="script-row" key={step.id}>
-                    <div className="script-step-tag">Step {step.id}</div>
-                    <div className="script-turn">
-                      <div className="script-user">
-                        <strong>Caller (You):</strong>
-                        <p>{step.userPrompt}</p>
-                        <small>{step.userPromptHindi}</small>
-                      </div>
-                      <div className="script-agent">
-                        <strong>Agent (Riya):</strong>
-                        <p>{step.agentResponse}</p>
-                        <small>{step.agentResponseHindi}</small>
-                      </div>
-                    </div>
-                    <button
-                      className="primary-btn small-btn"
-                      onClick={() => {
-                        setShowScriptModal(false);
-                        executeScriptStep(step.id - 1);
-                      }}
-                    >
-                      <Play size={13} /> Run Step
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="modal-actions-row">
-                <button
-                  type="button"
-                  className="primary-btn"
-                  onClick={() => {
-                    setShowScriptModal(false);
-                    startAutoPlay();
-                  }}
-                >
-                  <Play size={15} /> Auto-Run Entire Demo Now
-                </button>
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={() => setShowScriptModal(false)}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Agent Instructions & Prompt Modal */}
-      {showPromptModal && (
-        <div className="modal-backdrop" onClick={() => setShowPromptModal(false)}>
-          <div className="modal-card wide" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <div>
-                <span className="eyebrow">AGENT CONFIGURATION</span>
-                <h2>Clinic Receptionist System Instructions</h2>
-              </div>
-              <button className="icon-close-btn" onClick={() => setShowPromptModal(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="prompt-viewer">
-                <pre>{agent?.instructions || 'Loading system instructions...'}</pre>
-              </div>
-              <div className="modal-actions-row">
-                <button
-                  type="button"
-                  className="primary-btn"
-                  onClick={() => setShowPromptModal(false)}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

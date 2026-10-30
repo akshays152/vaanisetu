@@ -1,4 +1,4 @@
-import type { Agent, DemoScriptStep } from '../types';
+import type { Agent } from '../types';
 
 export const CLINIC_SYSTEM_INSTRUCTIONS = `
 You are "Aarogya Clinic Receptionist" (आरोग्य क्लिनिक रिसेप्शनिस्ट), a warm, empathetic, and professional bilingual voice assistant for Aarogya Clinic in New Delhi.
@@ -81,52 +81,5 @@ export const ELEVENLABS_VOICES = [
     accent: 'Indian / Multilingual',
     recommended: false,
     description: 'Soft-spoken and reassuring for healthcare consultations.',
-  },
-];
-
-// BACKUP DEMO SCRIPT:
-// Prepared specifically for Member 1's requirement:
-// "Test the conversation and prepare a backup demo script."
-export const BACKUP_DEMO_SCRIPT: DemoScriptStep[] = [
-  {
-    id: 1,
-    title: 'Warm Bilingual Greeting',
-    userPrompt: 'Hello, is this Aarogya Clinic?',
-    userPromptHindi: 'नमस्ते, क्या यह आरोग्य क्लिनिक है?',
-    agentResponse: 'Namaste! Ji haan, Aarogya Clinic mein aapka swagat hai. How can I help you today?',
-    agentResponseHindi: 'नमस्ते! जी हाँ, आरोग्य क्लिनिक में आपका स्वागत है। How can I help you today?',
-    intent: 'greeting',
-    notes: 'Agent greets warmly in Hindi + English to establish bilingual capability.',
-  },
-  {
-    id: 2,
-    title: 'Patient Intent & Doctor Inquiry',
-    userPrompt: 'I want to book an appointment with Dr. Mehta for a regular checkup.',
-    userPromptHindi: 'मुझे डॉ. मेहता से जनरल चेकअप के लिए अपॉइंटमेंट चाहिए।',
-    agentResponse: 'Ji bilkul! Dr. Ananya Mehta Tuesday morning available hain. Kya Tuesday 10:30 AM aapke liye convenient rahega?',
-    agentResponseHindi: 'जी बिल्कुल! डॉ. अनन्या मेहता Tuesday morning उपलब्ध हैं। क्या Tuesday 10:30 AM आपके लिए ठीक रहेगा?',
-    intent: 'slot_selection',
-    notes: 'Agent looks up Dr. Mehta’s schedule and suggests Tuesday 10:30 AM.',
-  },
-  {
-    id: 3,
-    title: 'Slot Agreement & Patient Details',
-    userPrompt: 'Yes, Tuesday 10:30 AM is good. The patient name is Sachin Sharma.',
-    userPromptHindi: 'हाँ, Tuesday सुबह 10:30 AM ठीक है। पेशेंट का नाम सचिन शर्मा है।',
-    agentResponse: 'Thank you, Sachin ji. Should I go ahead and confirm your 10:30 AM appointment with Dr. Mehta for Tuesday?',
-    agentResponseHindi: 'धन्यवाद सचिन जी। क्या मैं Tuesday 10:30 AM का अपॉइंटमेंट डॉ. मेहता के साथ कन्फर्म कर दूँ?',
-    intent: 'confirmation',
-    notes: 'Agent captures the patient name and asks for final verbal confirmation before booking.',
-  },
-  {
-    id: 4,
-    title: 'Booking Execution & Verification',
-    userPrompt: 'Yes, please confirm the appointment.',
-    userPromptHindi: 'हाँ, कृपया अपॉइंटमेंट कन्फर्म कर दीजिए।',
-    agentResponse: 'All set! Aapka appointment Tuesday, 12 November ko 10:30 AM Dr. Mehta ke sath successfully confirm ho gaya hai. SMS reminder bhej diya gaya hai.',
-    agentResponseHindi: 'बिल्कुल! आपका अपॉइंटमेंट Tuesday, 12 November को 10:30 AM डॉ. मेहता के साथ सफलतापूर्वक कन्फर्म हो गया है।',
-    intent: 'completed',
-    triggersBooking: true,
-    notes: 'Agent triggers backend booking tool and reports verified confirmation details.',
   },
 ];
