@@ -5,10 +5,10 @@ VaaniSetu is a bilingual voice-agent builder and appointment demo. It includes a
 ## Requirements
 
 - Node.js 18 or newer
-- Python 3.11 or newer
+- Python 3.10 or newer
 - Windows, macOS, or Linux with a current browser
 
-## Run locally
+## Run locally on Windows
 
 In the repository root, install the frontend dependencies and create the frontend environment file:
 
@@ -33,6 +33,32 @@ npm run dev -- --host 127.0.0.1 --port 4000
 ```
 
 Open `http://127.0.0.1:4000`. The API health check and interactive docs are at `http://127.0.0.1:8000/health` and `/docs`.
+
+## Run locally on macOS or Linux
+
+In the repository root, install frontend dependencies and create the environment file:
+
+```bash
+npm ci
+cp .env.example .env
+```
+
+Start the backend in one terminal:
+
+```bash
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate
+python -m pip install -r backend/requirements.txt
+python -m uvicorn app:app --reload --app-dir backend --port 8000
+```
+
+Start the frontend in another terminal:
+
+```bash
+npm run dev -- --host 127.0.0.1 --port 4000
+```
+
+Then open `http://127.0.0.1:4000`.
 
 The sample `.env` selects demo mode. Set `VITE_DEMO_MODE=false` to use the backend database for agents, slots, and bookings. Vite reads frontend environment values when it starts, so restart the frontend after changing `.env`.
 

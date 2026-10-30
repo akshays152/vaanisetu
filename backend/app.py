@@ -383,9 +383,13 @@ def latest_appointment():
         }
 
     return {
+        "id": row["id"],
+        "sessionId": row["session_id"],
         "status": row["status"],
         "patientName": row["patient_name"],
+        "doctorName": row["doctor"],
         "date": row["date"],
         "time": row["time"],
         "message": row["message"],
+        "createdAt": row["created_at"],
     }

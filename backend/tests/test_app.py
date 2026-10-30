@@ -2,6 +2,7 @@ from datetime import timedelta
 from urllib.error import HTTPError
 
 import pytest
+from fastapi.testclient import TestClient
 
 import app as api
 
@@ -53,6 +54,36 @@ def test_agent_crud_persists_in_test_database(database):
     with pytest.raises(api.HTTPException) as error:
         api.get_agent("missing-agent")
     assert error.value.status_code == 404
+
+
+def test_http_agent_slots_and_booking_flow(database):
+    with TestClient(api.app) as client:
+        created = client.post("/agents", json=agent_payload().model_dump())
+        assert created.status_code == 201
+        agent = created.json()
+        assert client.get("/agents").json()[0]["id"] == agent["id"]
+        assert client.get(f"/agents/{agent['id']}").json()["name"] == "Test Receptionist"
+
+        day = next_open_date()
+        available = client.get("/appointments/slots", params={"date": day})
+        assert available.status_code == 200
+        slot = available.json()["availableSlots"][0]
+
+        booking = client.post("/appointments", json={
+            "patientName": "API Test Patient",
+            "date": day,
+            "time": slot,
+            "doctor": "Dr. Ananya Mehta",
+        })
+        assert booking.status_code == 201
+        assert booking.json()["patientName"] == "API Test Patient"
+        assert client.get("/appointments/latest").json()["id"] == booking.json()["id"]
+        assert client.post("/appointments", json={
+            "patientName": "Another Patient",
+            "date": day,
+            "time": slot,
+            "doctor": "Dr. Ananya Mehta",
+        }).status_code == 409
 
 
 def test_booking_conflict_is_rejected(database):

@@ -386,9 +386,9 @@ export function Test() {
           <div className="messages">
             {!active ? (
               <div className="empty-chat">
-                <div className="mic-circle" onClick={startSession} style={{ cursor: 'pointer' }}>
+                <button type="button" className="mic-circle" onClick={startSession} aria-label="Start conversation">
                   <Mic size={28} />
-                </div>
+                </button>
                 <h3>Start bilingual voice conversation</h3>
                 <p>
                   Talk with the receptionist using your microphone or by typing a message. You can switch between Hindi and English.
@@ -454,6 +454,7 @@ export function Test() {
                 className={`mic-toggle-btn ${isListening ? 'active' : ''}`}
                 onClick={toggleListening}
                 title={isListening ? 'Stop listening' : 'Talk with microphone'}
+                aria-pressed={isListening}
               >
                 {isListening ? <MicOff size={18} /> : <Mic size={18} />}
               </button>
@@ -536,7 +537,7 @@ export function Test() {
             <small>Available times</small>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, borderTop: 0 }}>
               {slotsLoading ? <span className="muted">Checking available times…</span> : availableSlots.length ? availableSlots.map((slot) => (
-              <button key={slot} type="button" disabled={bookingSubmitting || Boolean(booking)} className={selectedSlot === slot ? 'primary-btn' : 'secondary-btn'} onClick={() => setSelectedSlot(slot)} style={{ padding: '7px 9px' }}>{slot}</button>
+              <button key={slot} type="button" disabled={bookingSubmitting || Boolean(booking)} aria-pressed={selectedSlot === slot} className={selectedSlot === slot ? 'primary-btn' : 'secondary-btn'} onClick={() => setSelectedSlot(slot)} style={{ padding: '7px 9px' }}>{slot}</button>
               )) : <span className="muted">No available times for this date.</span>}
             </div>
             {bookingError && <p role="alert" className="booking-error">{bookingError}</p>}
@@ -604,7 +605,7 @@ export function Test() {
                   type="button"
                   className="secondary-btn"
                   onClick={testVoiceSample}
-                  disabled={isSpeaking}
+                  disabled={isSpeaking || !speechEnabled || !('speechSynthesis' in window)}
                 >
                   <Volume2 size={16} /> Test Voice Sample
                 </button>
