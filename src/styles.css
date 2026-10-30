@@ -119,6 +119,11 @@
 
 .test-page .slot-error { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; color: #a6503d; font-size: 12px; }
 .test-page .slot-error button { color: var(--green); background: transparent; padding: 0; font-size: 12px; text-decoration: underline; }
+.agent-menu { position: relative; }
+.agent-menu-popover { position: absolute; right: 0; top: 36px; z-index: 20; min-width: 145px; padding: 6px; background: #fff; border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 12px 28px rgba(23, 60, 50, .14); }
+.agent-menu-popover a, .agent-menu-popover button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 12px; text-align: left; text-decoration: none; cursor: pointer; }
+.agent-menu-popover a:hover, .agent-menu-popover button:hover { background: #f1f7f3; }
+.agent-menu-popover button { color: #b44f43; }
 
 /* Patient-facing receptionist presentation */
 .test-page { max-width: 1180px; }

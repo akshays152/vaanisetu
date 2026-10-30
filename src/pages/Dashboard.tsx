@@ -11,6 +11,11 @@ export function Dashboard() {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
 
+  const handleDeleted = async (id: string) => {
+    await api.deleteAgent(id);
+    setAgents((current) => current.filter((agent) => agent.id !== id));
+  };
+
   useEffect(() => {
     api.listAgents()
       .then(setAgents)
@@ -52,7 +57,7 @@ export function Dashboard() {
       {error && <div className="error-banner" role="alert">{error}</div>}
       {loading ? <div className="empty-state">Loading your agents…</div> : (
         <div className="agent-grid">
-          {visibleAgents.map((agent) => <AgentCard key={agent.id} agent={agent} />)}
+          {visibleAgents.map((agent) => <AgentCard key={agent.id} agent={agent} onDeleted={handleDeleted} />)}
           {!query && <Link className="new-card" to="/builder"><span><Plus size={20} /></span><strong>Create a new agent</strong><small>Start with a blank canvas</small></Link>}
           {query && visibleAgents.length === 0 && <div className="empty-state">No agents match “{query}”. Try another search.</div>}
         </div>

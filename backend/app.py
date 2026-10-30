@@ -233,6 +233,18 @@ def update_agent(agent_id: str, payload: AgentInput):
     return agent
 
 
+@app.delete("/agents/{agent_id}", status_code=204)
+def delete_agent(agent_id: str):
+    with connect() as db:
+        deleted = db.execute(
+            "DELETE FROM agents WHERE id = ?",
+            (agent_id,),
+        ).rowcount
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+
 @app.post("/agents/{agent_id}/sessions", status_code=201)
 def start_session(agent_id: str):
     with connect() as db:
