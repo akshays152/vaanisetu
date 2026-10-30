@@ -1,83 +1,63 @@
-# VaaniSetu – Voice AI for Everyone
+# VaaniSetu
 
-**VaaniSetu** is a no-code Voice AI Agent Builder platform designed to make conversational AI accessible to everyone. It aims to allow users to create, customize, test, and deploy AI-powered voice agents without requiring extensive technical knowledge.
+VaaniSetu is a bilingual voice-agent builder and appointment demo. It includes an agent dashboard, an agent editor, a conversation test screen, appointment slots and receipts, and a FastAPI service backed by SQLite.
 
-Built around the concept of simplifying human–AI interaction, VaaniSetu combines voice technology, agent configuration, multilingual conversations, and backend integration into a unified platform.
+## Requirements
 
-## Key Features
+- Node.js 18 or newer
+- Python 3.11 or newer
+- Windows, macOS, or Linux with a current browser
 
-- **No-Code AI Agent Builder:** Create and configure voice agents through a simple and user-friendly interface.
-- **Customizable Agents:** Define agent names, purposes, instructions, languages, voices, and conversational behavior.
-- **Multilingual Communication:** Support for Hindi, English, and Hinglish conversations.
-- **Voice AI Integration:** Integration with ElevenLabs for AI-powered conversational voice experiences.
-- **Interactive Testing Environment:** Test agent conversations and evaluate their responses before deployment.
-- **Conversation Management:** Manage agent configurations and maintain session information.
-- **Backend Integration:** Connect frontend interactions with backend services through REST APIs.
-- **Responsive Interface:** Clean and intuitive design that provides a smooth experience across devices.
+## Run locally
 
-## How VaaniSetu Works
+In the repository root, install the frontend dependencies and create the frontend environment file:
 
-The platform is designed around five major stages:
+```powershell
+npm ci
+Copy-Item .env.example .env
+```
 
-### 1. Write – Create Your AI Agent
-Users can configure an AI voice agent by defining its identity, purpose, instructions, language, and voice preferences.
+Start the backend in one terminal:
 
-### 2. Test – Experience the Conversation
-Users can interact with their configured agents and test conversational behavior through the testing environment.
+```powershell
+py -3 -m venv backend/.venv
+.\backend\.venv\Scripts\Activate.ps1
+python -m pip install -r backend/requirements.txt
+python -m uvicorn app:app --reload --app-dir backend --port 8000
+```
 
-### 3. Refine – Improve Agent Behaviour
-Agent configurations and instructions can be adjusted to improve response quality and align the agent with the intended use case.
+Start the frontend in a second terminal:
 
-### 4. Deploy – Make Your Agent Available
-The platform is designed to support publishing voice agents through accessible deployment options, such as web-based integrations and shareable experiences.
+```powershell
+npm run dev -- --host 127.0.0.1 --port 4000
+```
 
-### 5. Observe – Monitor Interactions
-The platform aims to provide visibility into agent sessions and conversation outcomes, helping users understand and improve agent performance.
+Open `http://127.0.0.1:4000`. The API health check and interactive docs are at `http://127.0.0.1:8000/health` and `/docs`.
 
-## Technology Stack
+The sample `.env` selects demo mode. Set `VITE_DEMO_MODE=false` to use the backend database for agents, slots, and bookings. Vite reads frontend environment values when it starts, so restart the frontend after changing `.env`.
 
-**Frontend**
-- React.js
-- TypeScript
-- Vite
-- React Router
-- Lucide React
-- CSS
+## Voice
 
-**Backend**
-- Python
-- FastAPI
-- SQLite
-- REST APIs
+Text conversation and appointment booking work without an ElevenLabs account. Browser speech output uses a voice installed on the device when available. Microphone recognition depends on browser support and microphone permission; text input remains available as a fallback.
 
-**Voice AI**
-- ElevenLabs Conversational AI
-- ElevenLabs JavaScript Client
-- Web Speech API
-- Browser Speech Synthesis for demonstration fallback
+For live ElevenLabs sessions, set `ELEVENLABS_API_KEY` and `ELEVENLABS_AGENT_ID` in `backend/.env`. The agent must already be configured in ElevenLabs. Secrets belong only in the backend environment, never in a `VITE_` variable. If live voice is not configured, the test screen clearly switches to browser/text mode.
 
-## Project Architecture
+## Data and tests
 
-VaaniSetu follows a modular frontend-backend architecture.
+- Demo agents and bookings persist in that browser’s local storage.
+- Backend agents, sessions, and bookings persist in `backend/vaanisetu.db` (ignored by Git).
+- The sample booking schedule is defined in `backend/app.py`; Sunday is closed and past same-day slots are hidden.
+- Appointment booking checks availability again when saving and rejects duplicate slots.
 
-- **Frontend:** Provides the user interface for agent creation, configuration, testing, and interaction.
-- **Backend:** Handles API requests, agent configuration management, session records, and appointment-related operations.
-- **Voice AI Layer:** Connects the application with ElevenLabs to support conversational voice sessions.
-- **Database:** SQLite stores agent information, session records, and appointment data.
+Run the checks from the repository root:
 
-## Getting Started
+```powershell
+npm run lint
+$env:VITE_DEMO_MODE='true'; npm test -- --pool=forks
+npm run build
+.\backend\.venv\Scripts\python.exe -m pytest backend\tests -q
+```
 
-### Prerequisites
+## Scope and deployment
 
-- Node.js 18+
-- Python 3.10+
-- npm
-- ElevenLabs account and API credentials for live voice integration
-
-### Frontend Setup
-
-Clone the repository:
-
-```bash
-git clone <repository-url>
-cd vaanisetu
+The local setup is for development and demonstration on one computer. It has no user accounts, authorization, production database, or deployment configuration. Do not use it for real patient data or production bookings until those are added and reviewed. To make it available to other computers, deploy the frontend and API, configure HTTPS, CORS, persistent storage, access controls, and provider credentials for that environment.

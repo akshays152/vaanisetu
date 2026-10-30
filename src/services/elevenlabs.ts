@@ -3,11 +3,6 @@ import type { VoiceConfig } from '../types';
 const STORAGE_KEY = 'vaanisetu.elevenlabs.config';
 
 const DEFAULT_CONFIG: VoiceConfig = {
-  agentId: import.meta.env.VITE_ELEVENLABS_AGENT_ID || 'clinic_receptionist_aarogya',
-  voiceId: import.meta.env.VITE_ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM', // Riya
-  modelId: 'eleven_multilingual_v2',
-  stability: 0.55,
-  similarityBoost: 0.8,
   speechEnabled: true,
 };
 
@@ -65,7 +60,7 @@ export class ElevenLabsService {
   public async speak(
     text: string,
     options?: {
-      voiceId?: string;
+      voiceName?: string;
       onStart?: () => void;
       onEnd?: () => void;
       onError?: (err: Error) => void;
@@ -87,12 +82,12 @@ export class ElevenLabsService {
       
       // Match Hindi or Indian English voice if available in user's OS
       const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = options?.voiceName ? voices.find((voice) => voice.name === options.voiceName) : undefined;
       const hindiOrIndianVoice = voices.find(
         (v) => v.lang.includes('hi') || v.lang.includes('IN') || v.name.includes('India')
       );
-      if (hindiOrIndianVoice) {
-        utterance.voice = hindiOrIndianVoice;
-      }
+      utterance.voice = preferredVoice || hindiOrIndianVoice || voices[0] || null;
+      utterance.lang = utterance.voice?.lang || 'en-IN';
       utterance.rate = 0.98;
       utterance.pitch = 1.05;
 

@@ -41,7 +41,7 @@ export function Results() {
     </div>
   );
 
-  if (!booking) return (
+  if (!booking || (booking.status === 'pending' && !booking.date && !booking.patientName)) return (
     <div className="page result-page">
       <Link to="/dashboard" className="back"><ArrowLeft size={16} /> Back to dashboard</Link>
       <div className="result-wrap">
@@ -50,7 +50,7 @@ export function Results() {
         <h1>No appointment yet.</h1>
         <p className="result-copy">Start a conversation with your receptionist to make an appointment.</p>
         <div className="result-actions">
-          <Link className="primary-btn" to="/test/clinic-receptionist"><RotateCcw size={16} /> Start a conversation</Link>
+          <Link className="primary-btn" to="/dashboard"><RotateCcw size={16} /> Choose an agent</Link>
           <Link className="secondary-btn" to="/dashboard"><Home size={16} /> Dashboard</Link>
         </div>
       </div>
@@ -58,13 +58,14 @@ export function Results() {
   );
 
   const confirmed = booking.status === 'confirmed';
+  const title = confirmed ? 'Appointment confirmed.' : booking.status === 'failed' ? 'Appointment not confirmed.' : 'Appointment status';
   return (
     <div className="page result-page">
       <Link to="/dashboard" className="back"><ArrowLeft size={16} /> Back to dashboard</Link>
       <div className="result-wrap">
-        <div className="success-icon"><CheckCircle2 size={33} /></div>
+        <div className={`success-icon${confirmed ? '' : ' pending-icon'}`}><CheckCircle2 size={33} /></div>
         <div className="eyebrow">{confirmed ? 'BOOKING RECEIPT' : 'BOOKING UPDATE'}</div>
-        <h1>{confirmed ? 'Appointment confirmed.' : 'Appointment update'}</h1>
+        <h1>{title}</h1>
         <p className="result-copy">{booking.message}</p>
         <div className="appointment">
           <div><small>PATIENT / CUSTOMER</small><strong>{booking.patientName || '—'}</strong></div>
@@ -74,7 +75,7 @@ export function Results() {
         </div>
         <div className="result-actions">
           <Link className="primary-btn" to="/dashboard"><Home size={16} /> Dashboard</Link>
-          <Link className="secondary-btn" to="/test/clinic-receptionist"><RotateCcw size={16} /> Test again</Link>
+          <Link className="secondary-btn" to="/dashboard"><RotateCcw size={16} /> Choose another agent</Link>
         </div>
         <small className="synthetic">{demoMode ? 'Sample booking for demonstration.' : 'Appointment details are shown here for confirmation.'}</small>
       </div>

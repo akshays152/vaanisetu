@@ -13,11 +13,20 @@ import {
 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useEffect, useState, useRef } from 'react';
-import { api } from '../services/api';
+import { ApiError, api, getClinicDate } from '../services/api';
 import { voiceSession } from '../services/voiceSession';
 import { elevenLabsService } from '../services/elevenlabs';
-import { ELEVENLABS_VOICES } from '../data/clinicReceptionist';
-import type { Agent, BookingResult, ChatMessage, VoiceConfig } from '../types';
+import type { Agent, BookingResult, ChatMessage, TestSession } from '../types';
+
+function nextOpenClinicDate(): string {
+  let offset = 1;
+  while (true) {
+    const value = getClinicDate(offset);
+    const [year, month, day] = value.split('-').map(Number);
+    if (new Date(year, month - 1, day, 12).getDay() !== 0) return value;
+    offset += 1;
+  }
+}
 
 export function Test() {
   const { id = 'clinic-receptionist' } = useParams();
@@ -30,26 +39,35 @@ export function Test() {
   const [sessionMode, setSessionMode] = useState<'demo' | 'live'>('demo');
   const [sessionStatus, setSessionStatus] = useState('idle');
   const [sessionError, setSessionError] = useState('');
-  const [appointmentDate, setAppointmentDate] = useState(() => {
-    const date = new Date();
-    date.setDate(date.getDate() + 1);
-    if (date.getDay() === 0) date.setDate(date.getDate() + 1);
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-  });
+  const [sessionNotice, setSessionNotice] = useState('');
+  const [appointmentDate, setAppointmentDate] = useState(nextOpenClinicDate);
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(true);
+  const [slotsRetry, setSlotsRetry] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState('');
   const [bookingError, setBookingError] = useState('');
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
-  const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
   // Voice AI States
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [speechEnabled, setSpeechEnabled] = useState(true);
-  const [voiceConfig, setVoiceConfig] = useState<VoiceConfig>(elevenLabsService.getConfig());
+  const [speechEnabled, setSpeechEnabled] = useState(() => elevenLabsService.getConfig().speechEnabled);
+  const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [systemVoiceName, setSystemVoiceName] = useState(() => {
+    try { return localStorage.getItem('vaanisetu.browser.voice') || ''; } catch { return ''; }
+  });
   const [showConfig, setShowConfig] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const bookingInFlight = useRef(false);
+
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    const updateVoices = () => setSystemVoices(window.speechSynthesis.getVoices());
+    updateVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+  }, []);
 
   useEffect(() => {
     api.getAgent(id).then(setAgent);
@@ -58,7 +76,9 @@ export function Test() {
   useEffect(() => {
     let cancelled = false;
     setSelectedSlot('');
+    setAvailableSlots([]);
     setBookingError('');
+    setSlotsLoading(true);
     api.getAvailableSlots(appointmentDate).then((result) => {
       if (!cancelled) {
         setAvailableSlots(result.availableSlots);
@@ -69,9 +89,9 @@ export function Test() {
         setAvailableSlots([]);
         setBookingError(error.message);
       }
-    });
+    }).finally(() => { if (!cancelled) setSlotsLoading(false); });
     return () => { cancelled = true; };
-  }, [appointmentDate]);
+  }, [appointmentDate, slotsRetry]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -89,9 +109,17 @@ export function Test() {
   const startSession = async () => {
     if (active || sessionStatus === 'connecting') return;
     setSessionError('');
+    setSessionNotice('');
     setSessionStatus('connecting');
     try {
-      const session = await api.startSession(id);
+      let session: TestSession;
+      try {
+        session = await api.startSession(id);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) throw error;
+        session = { sessionId: `browser-${crypto.randomUUID()}`, mode: 'demo' as const };
+        setSessionNotice('Live voice is unavailable. Text and browser speech fallback are active; appointment saving still requires the backend.');
+      }
       setSessionId(session.sessionId);
       voiceSession.resetConversation();
 
@@ -130,7 +158,7 @@ export function Test() {
       setMessages([{ id: crypto.randomUUID(), from: 'agent', text: greeting, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
       if (speechEnabled) {
         setIsSpeaking(true);
-        await voiceSession.speak(greeting, () => setIsSpeaking(false));
+        await voiceSession.speak(greeting, () => setIsSpeaking(false), systemVoiceName);
       }
     } catch (error) {
       setSessionStatus('error');
@@ -173,7 +201,7 @@ export function Test() {
     }
 
     // Process through Receptionist Conversational Engine
-    const outcome = voiceSession.processMessage(text);
+    const outcome = voiceSession.processMessage(text, selectedSlot ? { date: appointmentDate, time: selectedSlot } : undefined);
 
     const agentMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -182,38 +210,62 @@ export function Test() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    setTimeout(async () => {
-      setMessages((prev) => [...prev, agentMsg]);
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
 
-      // If action is book_appointment, trigger backend persistence
-      if (outcome.action === 'book_appointment' && outcome.bookingData) {
-        if (bookingSubmitting || booking) return;
-        setBookingSubmitting(true);
-        try {
-          if (!selectedSlot) throw new Error('Choose an available appointment time first.');
-          const saved = await api.bookAppointment({
-            patientName: outcome.bookingData.patientName || 'Sachin Sharma',
-            doctor: outcome.bookingData.doctorName || 'Dr. Ananya Mehta',
-            date: appointmentDate,
-            time: selectedSlot,
-            sessionId,
-          });
-          const confirmed = { ...outcome.bookingData, ...saved, date: appointmentDate, time: selectedSlot };
-          setBooking(confirmed);
-          setBookingError('');
-        } catch (error) {
-          setBookingError(error instanceof Error ? error.message : 'Could not save the appointment.');
-        } finally {
-          setBookingSubmitting(false);
+    if (outcome.action === 'book_appointment' && outcome.bookingData) {
+      if (bookingInFlight.current || booking) return;
+      bookingInFlight.current = true;
+      setBookingSubmitting(true);
+      setBookingError('');
+      setMessages((previous) => [...previous, {
+        ...agentMsg,
+        text: 'Saving your appointment…',
+      }]);
+      try {
+        const patientName = outcome.bookingData.patientName?.trim();
+        if (!patientName) throw new Error('The patient name is missing. Please restart the conversation and provide it.');
+        const saved = await api.bookAppointment({
+          patientName,
+          doctor: outcome.bookingData.doctorName || 'Dr. Ananya Mehta',
+          date: outcome.bookingData.date || appointmentDate,
+          time: outcome.bookingData.time || selectedSlot,
+          sessionId,
+        });
+        const confirmed = { ...outcome.bookingData, ...saved };
+        setBooking(confirmed);
+        setBookingError('');
+        voiceSession.markBookingSaved();
+        setMessages((previous) => [...previous, {
+          id: crypto.randomUUID(),
+          from: 'agent',
+          text: saved.status === 'confirmed' ? saved.message : `The appointment was not confirmed: ${saved.message}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
+        if (speechEnabled) {
+          setIsSpeaking(true);
+          await voiceSession.speak(saved.message, () => setIsSpeaking(false), systemVoiceName);
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not save the appointment.';
+        setBookingError(message);
+        setMessages((previous) => [...previous, {
+          id: crypto.randomUUID(),
+          from: 'agent',
+          text: `I couldn’t save the appointment. ${message} Please try confirming again.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
+      } finally {
+        bookingInFlight.current = false;
+        setBookingSubmitting(false);
       }
+      return;
+    }
 
-      // Voice Audio Response via ElevenLabs
-      if (speechEnabled) {
-        setIsSpeaking(true);
-        await voiceSession.speak(outcome.reply, () => setIsSpeaking(false));
-      }
-    }, 400);
+    setMessages((previous) => [...previous, agentMsg]);
+    if (speechEnabled) {
+      setIsSpeaking(true);
+      await voiceSession.speak(outcome.reply, () => setIsSpeaking(false), systemVoiceName);
+    }
   };
 
   // Toggle Live Microphone Listening
@@ -241,7 +293,7 @@ export function Test() {
         },
         (err) => {
           setIsListening(false);
-          console.warn('Speech recognition notice:', err);
+          setSessionError(err);
         }
       );
 
@@ -251,18 +303,12 @@ export function Test() {
     }
   };
 
-  const handleSaveVoiceConfig = (updates: Partial<VoiceConfig>) => {
-    const updated = elevenLabsService.saveConfig(updates);
-    setVoiceConfig(updated);
-    setSpeechEnabled(updated.speechEnabled);
-  };
-
   const testVoiceSample = async () => {
     setIsSpeaking(true);
     await elevenLabsService.speak(
-      'Namaste! Aarogya Clinic mein aapka swagat hai. Main aapki kya sahayata kar sakti hoon?',
+      'Namaste! Aarogya Clinic mein aapka swagat hai. How can I help you today?',
       {
-        voiceId: voiceConfig.voiceId,
+        voiceName: systemVoiceName,
         onEnd: () => setIsSpeaking(false),
       }
     );
@@ -296,13 +342,14 @@ export function Test() {
           <div className={`connection ${active ? 'connected' : ''}`}>
             <i />
             {active
-              ? sessionMode === 'live' ? 'Live ElevenLabs · Connected' : 'Demo session · Browser fallback'
+              ? sessionMode === 'live' ? 'Live ElevenLabs · Connected' : speechEnabled && 'speechSynthesis' in window ? 'Demo session · Browser speech' : 'Demo session · Text only'
               : sessionStatus === 'connecting' ? 'Connecting…' : 'Ready to connect'}
           </div>
         </div>
       </div>
 
       {sessionError && <div className="error-banner" role="alert">{sessionError}</div>}
+      {sessionNotice && <div className="info-banner" role="status">{sessionNotice}</div>}
 
       <div className="test-layout">
         {/* Main Conversation Stream */}
@@ -312,9 +359,7 @@ export function Test() {
               <span className="avatar small">{agent?.name.slice(0, 1) || 'A'}</span>
               <div>
                 <b>{agent?.name || 'Aarogya Clinic Receptionist'}</b>
-                <span className="voice-tag">
-                  <Volume2 size={11} /> {voiceConfig.voiceId === '21m00Tcm4TlvDq8ikWAM' ? 'Riya (Hindi/English)' : 'ElevenLabs Voice'}
-                </span>
+                <span className="voice-tag"><Volume2 size={11} /> {sessionMode === 'live' ? 'ElevenLabs live voice' : systemVoiceName || 'System voice (browser)'}</span>
               </div>
             </div>
 
@@ -333,7 +378,7 @@ export function Test() {
                 </span>
               )}
               <span className="demo-tag">
-                {sessionMode === 'live' ? 'ELEVENLABS LIVE' : 'BROWSER SPEECH FALLBACK'}
+                {sessionMode === 'live' ? 'ELEVENLABS LIVE' : speechEnabled && 'speechSynthesis' in window ? 'BROWSER SPEECH FALLBACK' : 'TEXT DEMO'}
               </span>
             </div>
           </div>
@@ -350,7 +395,7 @@ export function Test() {
                 </p>
                 <div className="empty-actions">
                   <button className="primary-btn" onClick={startSession}>
-                    <Mic size={17} /> Start Voice Session
+                    <Mic size={17} /> Start conversation
                   </button>
                 </div>
               </div>
@@ -391,11 +436,11 @@ export function Test() {
                   <button onClick={() => handleSendMessage('Mujhe Dr. Mehta se appointment chahiye')}>
                     🗣️ "Dr. Mehta se appointment chahiye"
                   </button>
-                  <button onClick={() => handleSendMessage('Tuesday 10:30 AM chalega, please confirm')}>
-                    ✅ "Tuesday 10:30 AM chalega"
+                  <button onClick={() => handleSendMessage('My name is Demo Patient')}>
+                    👤 "My name is Demo Patient"
                   </button>
-                  <button onClick={() => handleSendMessage('Aarogya Clinic ke timings aur fee kya hai?')}>
-                    🕒 "Timings aur fees kya hai?"
+                  <button onClick={() => handleSendMessage('Yes, please')}>
+                    ✅ "Yes, please"
                   </button>
                 </div>
               </>
@@ -427,13 +472,16 @@ export function Test() {
               <button
                 type="button"
                 className="voice-mute-btn"
-                onClick={() => setSpeechEnabled(!speechEnabled)}
+                onClick={() => {
+                  const updated = elevenLabsService.saveConfig({ speechEnabled: !speechEnabled });
+                  setSpeechEnabled(updated.speechEnabled);
+                }}
                 title={speechEnabled ? 'Mute voice audio' : 'Unmute voice audio'}
               >
                 {speechEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
               </button>
 
-              <button type="button" onClick={() => handleSendMessage()}>
+              <button type="button" disabled={bookingSubmitting || Boolean(booking)} onClick={() => handleSendMessage()}>
                 <Send size={17} />
               </button>
             </div>
@@ -452,7 +500,7 @@ export function Test() {
 
             <span>
               <Volume2 size={14} />{' '}
-              {sessionMode === 'live' ? 'ElevenLabs session audio' : speechEnabled ? 'Browser speech fallback' : 'Voice audio muted'}
+              {sessionMode === 'live' ? 'ElevenLabs session audio' : speechEnabled && 'speechSynthesis' in window ? 'Browser speech fallback' : 'Text only'}
             </span>
           </div>
         </section>
@@ -471,7 +519,7 @@ export function Test() {
             </div>
             <div>
               <small>ELEVENLABS VOICE</small>
-              <strong>{voiceConfig.voiceId === '21m00Tcm4TlvDq8ikWAM' ? 'Riya — Warm & clear' : 'Custom Voice'}</strong>
+              <strong>{sessionMode === 'live' ? 'ElevenLabs live voice' : systemVoiceName || 'System default voice'}</strong>
             </div>
             <div>
               <small>MODEL</small>
@@ -483,15 +531,16 @@ export function Test() {
             <h3>Choose an appointment</h3>
             <label className="field">
               <span>Date</span>
-              <input type="date" value={appointmentDate} min={localDate(new Date())} onChange={(event) => setAppointmentDate(event.target.value)} />
+              <input type="date" value={appointmentDate} min={getClinicDate()} onChange={(event) => setAppointmentDate(event.target.value)} />
             </label>
             <small>Available times</small>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, borderTop: 0 }}>
-              {availableSlots.length ? availableSlots.map((slot) => (
-                <button key={slot} type="button" className={selectedSlot === slot ? 'primary-btn' : 'secondary-btn'} onClick={() => setSelectedSlot(slot)} style={{ padding: '7px 9px' }}>{slot}</button>
+              {slotsLoading ? <span className="muted">Checking available times…</span> : availableSlots.length ? availableSlots.map((slot) => (
+              <button key={slot} type="button" disabled={bookingSubmitting || Boolean(booking)} className={selectedSlot === slot ? 'primary-btn' : 'secondary-btn'} onClick={() => setSelectedSlot(slot)} style={{ padding: '7px 9px' }}>{slot}</button>
               )) : <span className="muted">No available times for this date.</span>}
             </div>
             {bookingError && <p role="alert" className="booking-error">{bookingError}</p>}
+            {!slotsLoading && !availableSlots.length && <button type="button" className="secondary-btn small-btn" onClick={() => setSlotsRetry((attempt) => attempt + 1)}>Retry availability</button>}
           </div>
 
           {/* Real Confirmed Booking Outcome Card */}
@@ -501,10 +550,10 @@ export function Test() {
               <small>VERIFIED BOOKING OUTCOME</small>
               <h3>{booking.date}</h3>
               <p>
-                {booking.time} · {booking.patientName || 'Sachin Sharma'}
+                {booking.time} · {booking.patientName || 'Patient'}
               </p>
               <div className="result-doctor-badge">
-                <UserCheck size={13} /> {booking.doctorName || 'Dr. Ananya Mehta'}
+                <UserCheck size={13} /> {booking.doctorName || 'Clinic doctor'}
               </div>
               <Link to="/results" state={{ booking }}>
                 View full booking receipt <ArrowLeft size={14} style={{ transform: 'rotate(180deg)' }} />
@@ -521,8 +570,8 @@ export function Test() {
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">ELEVENLABS VOICE SETTINGS</span>
-                <h2>Configure Voice AI</h2>
+                <span className="eyebrow">VOICE OUTPUT</span>
+                <h2>Browser voice settings</h2>
               </div>
               <button className="icon-close-btn" onClick={() => setShowConfig(false)}>
                 ✕
@@ -530,29 +579,24 @@ export function Test() {
             </div>
 
             <div className="modal-body">
-              <p className="modal-sub">
-                Live ElevenLabs voice requires a backend-authorized session. This browser-only demo uses
-                speech synthesis and microphone recognition as a clearly labeled fallback.
-              </p>
+              <p className="modal-sub">Choose a voice installed on this device for browser speech. Live ElevenLabs sessions use the voice configured on the server agent.</p>
 
               <label className="field-group">
-                <span>Selected Voice</span>
+                <span>Installed system voice</span>
                 <select
-                  value={voiceConfig.voiceId}
-                  onChange={(e) => handleSaveVoiceConfig({ voiceId: e.target.value })}
+                  value={systemVoiceName}
+                  onChange={(event) => {
+                    setSystemVoiceName(event.target.value);
+                    try {
+                      if (event.target.value) localStorage.setItem('vaanisetu.browser.voice', event.target.value);
+                      else localStorage.removeItem('vaanisetu.browser.voice');
+                    } catch { /* Keep the choice for this page if storage is unavailable. */ }
+                  }}
                 >
-                  {ELEVENLABS_VOICES.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name} ({v.accent})
-                    </option>
-                  ))}
+                  <option value="">Automatic (Hindi / Indian English when available)</option>
+                  {systemVoices.map((voice) => <option key={`${voice.name}-${voice.lang}`} value={voice.name}>{voice.name} ({voice.lang})</option>)}
                 </select>
-              </label>
-
-              <label className="field-group">
-                <span>Model</span>
-                <input value="eleven_multilingual_v2" disabled />
-                <small>Optimized for accurate Hindi and English phonemes & pronunciation.</small>
+                {!systemVoices.length && <small>This browser has not exposed installed speech voices. The text conversation remains available.</small>}
               </label>
 
               <div className="modal-actions-row">

@@ -38,11 +38,6 @@ export type TestSession = {
 export type VoiceSessionState = 'unavailable' | 'ready' | 'speaking' | 'listening' | 'idle';
 
 export type VoiceConfig = {
-  agentId: string;
-  voiceId: string;
-  modelId: string;
-  stability: number;
-  similarityBoost: number;
   speechEnabled: boolean;
 };
 

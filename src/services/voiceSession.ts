@@ -1,7 +1,7 @@
-import { Conversation, type Conversation as ConversationInstance, type MessagePayload, type Mode, type Status } from '@elevenlabs/client';
+import type { Conversation as ConversationInstance, MessagePayload, Mode, Status } from '@elevenlabs/client';
 import type { TestSession, VoiceSessionState } from '../types';
 import { elevenLabsService } from './elevenlabs';
-import { clinicConversationEngine } from './conversationEngine';
+import { clinicConversationEngine, type AppointmentChoice } from './conversationEngine';
 
 export type LiveSessionHandlers = {
   onStatusChange?: (status: Status) => void;
@@ -12,14 +12,15 @@ export type LiveSessionHandlers = {
 
 export interface VoiceSessionController {
   getState: (session?: TestSession) => VoiceSessionState;
-  speak: (text: string, onEnd?: () => void) => Promise<void>;
+  speak: (text: string, onEnd?: () => void, voiceName?: string) => Promise<void>;
   stopAudio: () => void;
   startListening: (
     onTranscript: (text: string, isFinal: boolean) => void,
     onError?: (err: string) => void
   ) => boolean;
   stopListening: () => void;
-  processMessage: (text: string) => ReturnType<typeof clinicConversationEngine.processMessage>;
+  processMessage: (text: string, choice?: AppointmentChoice) => ReturnType<typeof clinicConversationEngine.processMessage>;
+  markBookingSaved: () => void;
   resetConversation: () => void;
   startLiveSession: (session: TestSession, handlers: LiveSessionHandlers) => Promise<void>;
   endLiveSession: () => Promise<void>;
@@ -38,8 +39,8 @@ export const voiceSession: VoiceSessionController = {
     return 'idle';
   },
 
-  async speak(text: string, onEnd?: () => void): Promise<void> {
-    await elevenLabsService.speak(text, { onEnd });
+  async speak(text: string, onEnd?: () => void, voiceName?: string): Promise<void> {
+    await elevenLabsService.speak(text, { onEnd, voiceName });
   },
 
   stopAudio(): void {
@@ -60,8 +61,12 @@ export const voiceSession: VoiceSessionController = {
     elevenLabsService.stopListening();
   },
 
-  processMessage(text: string) {
-    return clinicConversationEngine.processMessage(text);
+  processMessage(text: string, choice?: AppointmentChoice) {
+    return clinicConversationEngine.processMessage(text, choice);
+  },
+
+  markBookingSaved(): void {
+    clinicConversationEngine.markBookingSaved();
   },
 
   resetConversation(): void {
@@ -69,6 +74,7 @@ export const voiceSession: VoiceSessionController = {
   },
 
   async startLiveSession(session: TestSession, handlers: LiveSessionHandlers): Promise<void> {
+    const { Conversation } = await import('@elevenlabs/client');
     if (liveConversation) {
       await liveConversation.endSession();
       liveConversation = null;

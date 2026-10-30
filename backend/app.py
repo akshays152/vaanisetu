@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 import json
@@ -11,14 +11,14 @@ from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 
 
+load_dotenv(Path(__file__).with_name(".env"))
 DB_PATH = Path(
     os.getenv("VAANISETU_DB_PATH", str(Path(__file__).with_name("vaanisetu.db")))
 ).resolve()
-load_dotenv(Path(__file__).with_name(".env"))
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID", "").strip()
 ELEVENLABS_SIGNED_URL_ENDPOINT = "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url"
@@ -35,6 +35,7 @@ AVAILABLE_SLOTS = [
     "2:00 PM",
     "2:30 PM",
 ]
+CLINIC_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
 
 def validate_appointment_date(value: str):
@@ -46,7 +47,8 @@ def validate_appointment_date(value: str):
             detail="Date must use YYYY-MM-DD format",
         )
 
-    if requested_date < datetime.now().date():
+    today = datetime.now(CLINIC_TIMEZONE).date()
+    if requested_date < today:
         raise HTTPException(status_code=400, detail="Date is in the past")
 
     if requested_date.weekday() == 6:
@@ -57,6 +59,7 @@ def validate_appointment_date(value: str):
 
 
 def connect():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     return db
@@ -131,11 +134,19 @@ class AgentInput(BaseModel):
 
 
 class BookingInput(BaseModel):
-    patientName: str
+    patientName: str = Field(min_length=1, max_length=120)
     date: str
     time: str
-    doctor: str = "Dr. Mehta"
+    doctor: str = Field(default="Dr. Mehta", min_length=1, max_length=120)
     sessionId: str | None = None
+
+    @field_validator("patientName", "doctor")
+    @classmethod
+    def require_nonblank_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("This field cannot be blank")
+        return normalized
 
 
 def row_to_agent(row):
@@ -251,13 +262,17 @@ def start_session(agent_id: str):
         if exists is None:
             raise HTTPException(status_code=404, detail="Agent not found")
 
+    # Authorize with the provider before writing the session row. If live voice
+    # is not configured, the failed request should not leave an orphan session.
+    signed_url = get_elevenlabs_signed_url()
+
+    with connect() as db:
         session_id = str(uuid4())
         db.execute(
             "INSERT INTO sessions (id, agent_id, created_at) VALUES (?, ?, ?)",
             (session_id, agent_id, datetime.now(timezone.utc).isoformat()),
         )
 
-    signed_url = get_elevenlabs_signed_url()
     return {
         "sessionId": session_id,
         "mode": "live",
@@ -278,11 +293,17 @@ def get_available_slots(date: str):
         ).fetchall()
 
     booked = {row["time"] for row in rows}
+    now = datetime.now(CLINIC_TIMEZONE)
+    requested_date = datetime.strptime(date, "%Y-%m-%d").date()
 
     return {
         "date": date,
         "availableSlots": [
-            slot for slot in AVAILABLE_SLOTS if slot not in booked
+            slot for slot in AVAILABLE_SLOTS
+            if slot not in booked and (
+                requested_date > now.date()
+                or datetime.strptime(slot, "%I:%M %p").time() > now.time().replace(tzinfo=None)
+            )
         ],
     }
 
@@ -296,6 +317,10 @@ def book_appointment(payload: BookingInput):
             status_code=400,
             detail="That time is not an available clinic slot",
         )
+    if payload.date == datetime.now(CLINIC_TIMEZONE).date().isoformat():
+        requested_time = datetime.strptime(payload.time, "%I:%M %p").time()
+        if requested_time <= datetime.now(CLINIC_TIMEZONE).time().replace(tzinfo=None):
+            raise HTTPException(status_code=400, detail="That appointment time has already passed")
 
     appointment = payload.model_dump()
     appointment.update({

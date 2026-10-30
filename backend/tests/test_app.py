@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import timedelta
 from urllib.error import HTTPError
 
 import pytest
@@ -7,7 +7,7 @@ import app as api
 
 
 def next_open_date() -> str:
-    value = date.today() + timedelta(days=1)
+    value = api.datetime.now(api.CLINIC_TIMEZONE).date() + timedelta(days=1)
     while value.weekday() == 6:
         value += timedelta(days=1)
     return value.isoformat()
@@ -74,7 +74,7 @@ def test_invalid_slot_and_past_date_are_rejected(database):
     assert slot_error.value.status_code == 400
 
     past_booking = api.BookingInput(
-        patientName="Demo Patient", date=(date.today() - timedelta(days=1)).isoformat(), time="10:30 AM"
+        patientName="Demo Patient", date=(api.datetime.now(api.CLINIC_TIMEZONE).date() - timedelta(days=1)).isoformat(), time="10:30 AM"
     )
     with pytest.raises(api.HTTPException) as date_error:
         api.book_appointment(past_booking)
@@ -86,6 +86,23 @@ def test_live_session_requires_server_configuration(database):
     with pytest.raises(api.HTTPException) as error:
         api.start_session(created["id"])
     assert error.value.status_code == 503
+    with api.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+
+
+def test_live_session_provider_error_does_not_leave_orphan_session(database, monkeypatch):
+    created = api.create_agent(agent_payload())
+    monkeypatch.setattr(api, "ELEVENLABS_API_KEY", "server-test-key")
+    monkeypatch.setattr(api, "ELEVENLABS_AGENT_ID", "agent_test123")
+
+    def fail_provider():
+        raise api.HTTPException(status_code=502, detail="ElevenLabs authorization is unavailable")
+
+    monkeypatch.setattr(api, "get_elevenlabs_signed_url", fail_provider)
+    with pytest.raises(api.HTTPException):
+        api.start_session(created["id"])
+    with api.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
 
 def test_live_session_provider_failure_is_sanitized(database, monkeypatch):

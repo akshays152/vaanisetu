@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.stubEnv('VITE_DEMO_MODE', 'true');
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {
@@ -23,6 +25,7 @@ describe('demo API boundary', () => {
   });
 
   it('returns an explicitly confirmed synthetic booking only in demo mode', async () => {
+    expect(await api.getBooking()).toBeNull();
     const result = await api.bookAppointment({
       patientName: 'Demo Patient',
       date: '2026-11-03',
@@ -31,5 +34,8 @@ describe('demo API boundary', () => {
     });
     expect(result.status).toBe('confirmed');
     expect(result.message).toContain('booked');
+    expect(await api.getBooking()).toEqual(result);
+    const slots = await api.getAvailableSlots('2026-11-03');
+    expect(slots.availableSlots).not.toContain('10:30 AM');
   });
 });

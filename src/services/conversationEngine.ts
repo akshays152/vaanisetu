@@ -1,183 +1,156 @@
 import type { BookingResult } from '../types';
 
 export type ConversationState = {
-  stage: 'greeting' | 'inquiring' | 'offering_slot' | 'awaiting_confirmation' | 'booked';
+  stage: 'greeting' | 'inquiring' | 'collecting_name' | 'awaiting_confirmation' | 'booked';
   patientName: string;
   doctorName: string;
   proposedDate: string;
   proposedTime: string;
-  reason: string;
 };
 
-export class ClinicConversationEngine {
-  private state: ConversationState;
+export type AppointmentChoice = { date: string; time: string };
 
-  constructor() {
-    this.state = this.getInitialState();
+const affirmative = /^(?:(?:yes|yeah|yep|sure|okay|ok)(?:\s+please)?|haan|ha|हाँ|जी हाँ|confirm|please do|go ahead|kar dijiye|कर दीजिए)[.!\s]*$/iu;
+const negative = /^(no|nope|cancel|नहीं|नही|cancel it)[.!\s]*$/iu;
+const namePattern = /(?:my name is|name is|patient name is|i am|i'm|mera naam|मेरा नाम|नाम है)\s+([\p{L}]+(?:\s+[\p{L}]+){0,2})/iu;
+
+function formatDate(value: string): string {
+  const parsed = new Date(`${value}T12:00:00`);
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+export class ClinicConversationEngine {
+  private state: ConversationState = this.initialState();
+
+  private initialState(): ConversationState {
+    return { stage: 'greeting', patientName: '', doctorName: 'Dr. Ananya Mehta', proposedDate: '', proposedTime: '' };
   }
 
   public reset(): void {
-    this.state = this.getInitialState();
+    this.state = this.initialState();
+  }
+
+  public markBookingSaved(): void {
+    this.state.stage = 'booked';
   }
 
   public getState(): ConversationState {
     return { ...this.state };
   }
 
-  private getInitialState(): ConversationState {
-    return {
-      stage: 'greeting',
-      patientName: 'Sachin Sharma',
-      doctorName: 'Dr. Ananya Mehta (General Medicine)',
-      proposedDate: 'Tuesday, 12 November 2026',
-      proposedTime: '10:30 AM',
-      reason: 'General consultation',
-    };
-  }
-
-  /**
-   * Process incoming Hindi or English user message and generate a natural bilingual response
-   */
-  public processMessage(input: string): {
+  public processMessage(input: string, choice?: AppointmentChoice): {
     reply: string;
     action?: 'book_appointment';
     bookingData?: BookingResult;
   } {
-    const raw = input.toLowerCase().trim();
+    const raw = input.trim();
+    const text = raw.toLocaleLowerCase().replace(/[,]/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // Emergency triage detection
-    if (
-      raw.includes('chest pain') ||
-      raw.includes('heart attack') ||
-      raw.includes('saas lene me takleef') ||
-      raw.includes('khoon') ||
-      raw.includes('emergency') ||
-      raw.includes('accident')
-    ) {
-      return {
-        reply:
-          'Dhyan dein! Agar yeh emergency hai, toh kripya turant 108 helpline par call karein ya paas ke trauma hospital jayein.',
-      };
+    if (/chest pain|heart attack|saas lene me takleef|breathing problem|emergency|accident|छाती में दर्द|सांस लेने में तकलीफ/iu.test(text)) {
+      return { reply: 'If this may be an emergency, please call your local emergency number now or go to the nearest emergency department.' };
     }
 
-    // 1. Initial Greeting / Inquiry
-    if (
-      this.state.stage === 'greeting' ||
-      raw.includes('hello') ||
-      raw.includes('namaste') ||
-      raw.includes('pranam') ||
-      raw.includes('hi')
-    ) {
-      if (
-        raw.includes('appointment') ||
-        raw.includes('doctor') ||
-        raw.includes('milna') ||
-        raw.includes('checkup') ||
-        raw.includes('book')
-      ) {
-        this.state.stage = 'offering_slot';
-        this.detectDoctor(raw);
-        this.detectName(raw);
-        return {
-          reply: `Ji bilkul! ${this.state.doctorName} Tuesday ko available hain. Kya Tuesday morning 10:30 AM ka slot aapke liye theek rahega?`,
-        };
+    if (this.state.stage === 'booked') {
+      return { reply: 'This conversation already has a completed booking. Start a new conversation to make another appointment.' };
+    }
+
+    if (this.state.stage === 'greeting' && !this.isAppointmentRequest(text)) {
+      this.state.stage = 'inquiring';
+      return { reply: 'Namaste! Welcome to Aarogya Clinic. How can I help you today? I can help arrange an appointment.' };
+    }
+
+    if (this.state.stage === 'inquiring' && !this.isAppointmentRequest(text)) {
+      return { reply: 'I can help arrange an appointment. Which doctor would you like to see?' };
+    }
+
+    if (this.isAppointmentRequest(text)) this.detectDoctor(text);
+
+    if (this.state.stage === 'collecting_name') {
+      const name = this.extractName(raw) || raw.replace(/^(my name is|name is|patient name is|i am|i'm|mera naam|मेरा नाम)\s*/iu, '').trim();
+      if (!name || this.isAppointmentRequest(text)) {
+        return { reply: 'Please tell me the patient’s name so I can prepare the appointment.' };
+      }
+      this.state.patientName = name;
+      return this.confirmationPrompt(choice);
+    }
+
+    if (this.state.stage === 'awaiting_confirmation') {
+      if (negative.test(text)) {
+        this.state.stage = 'inquiring';
+        return { reply: 'No problem. Choose another available time, then tell me when you’re ready.' };
+      }
+      if (choice && (choice.date !== this.state.proposedDate || choice.time !== this.state.proposedTime)) {
+        return this.confirmationPrompt(choice);
+      }
+      if (!affirmative.test(text)) {
+        const name = this.extractName(raw);
+        if (name) this.state.patientName = name;
+        return this.confirmationPrompt(choice);
+      }
+      if (!this.state.patientName) {
+        this.state.stage = 'collecting_name';
+        return { reply: 'Before I can book, what is the patient’s name?' };
+      }
+      if (!this.state.proposedDate || !this.state.proposedTime) {
+        return { reply: 'Please choose an available date and time from the appointment panel first.' };
       }
 
-      this.state.stage = 'inquiring';
-      return {
-        reply:
-          'Namaste! Aarogya Clinic mein aapka swagat hai. Main aapki kya sahayata kar sakti hoon? Kya aap Dr. Mehta ya Dr. Sharma se appointment lena chahte hain?',
-      };
-    }
-
-    // 2. Doctor / Reason inquiry or request
-    if (
-      raw.includes('appointment') ||
-      raw.includes('doctor') ||
-      raw.includes('mehta') ||
-      raw.includes('sharma') ||
-      raw.includes('verma') ||
-      raw.includes('bimar') ||
-      raw.includes('checkup')
-    ) {
-      this.detectDoctor(raw);
-      this.detectName(raw);
-      this.state.stage = 'offering_slot';
-      return {
-        reply: `Ji zaroor. ${this.state.doctorName} ke paas Tuesday ko opening hai. Kya Tuesday morning 10:30 AM slot book kar doon?`,
-      };
-    }
-
-    // 3. Slot agreement or Name submission
-    if (
-      this.state.stage === 'offering_slot' ||
-      (this.state.stage !== 'awaiting_confirmation' && raw.includes('10:30')) ||
-      (this.state.stage !== 'awaiting_confirmation' && (raw.includes('tuesday') ||
-      raw.includes('morning') ||
-      raw.includes('chalega') ||
-      raw.includes('theek hai') ||
-      raw.includes('ha') ||
-      raw.includes('yes')))
-    ) {
-      this.detectName(raw);
-      this.state.stage = 'awaiting_confirmation';
-      const nameGreeting = this.state.patientName ? `${this.state.patientName} ji` : 'Aapke';
-      return {
-        reply: `Shukriya! ${nameGreeting} ke naam se Dr. Mehta ke sath Tuesday 10:30 AM ka appointment lock kar diya jaye? Please confirm karein.`,
-      };
-    }
-
-    // 4. Final Confirmation
-    if (
-      this.state.stage === 'awaiting_confirmation' ||
-      raw.includes('confirm') ||
-      raw.includes('kardo') ||
-      raw.includes('haan') ||
-      raw.includes('yes') ||
-      raw.includes('kar dijiye') ||
-      raw.includes('sure') ||
-      raw.includes('okay')
-    ) {
-      this.state.stage = 'booked';
       const bookingData: BookingResult = {
-        status: 'confirmed',
-        patientName: this.state.patientName || 'Sachin Sharma',
+        status: 'pending',
+        patientName: this.state.patientName,
         doctorName: this.state.doctorName,
         date: this.state.proposedDate,
         time: this.state.proposedTime,
-        message: `Appointment confirmed with ${this.state.doctorName} on ${this.state.proposedDate} at ${this.state.proposedTime}. Aarogya Clinic, Green Park.`,
-        appointmentId: `AAR-${Math.floor(1000 + Math.random() * 9000)}`,
+        message: 'Saving your appointment now.',
       };
-
-      return {
-        reply: `Badhiya! Aapka appointment ${this.state.proposedDate} ko 10:30 AM Dr. Mehta ke sath confirm ho gaya hai. SMS confirmation bhej diya gaya hai!`,
-        action: 'book_appointment',
-        bookingData,
-      };
+      return { reply: 'Thank you. I’m saving that appointment now.', action: 'book_appointment', bookingData };
     }
 
-    // Default polite bilingual fallback
-    return {
-      reply:
-        'Main samajh gayi. Kya aap Aarogya Clinic mein Dr. Mehta ke sath appointment book karna chahte hain, ya timings janna chahte hain?',
-    };
+    if (this.isAppointmentRequest(text)) {
+      this.state.patientName = this.extractName(raw) || '';
+      return this.state.patientName ? this.confirmationPrompt(choice) : this.askForName(choice);
+    }
+
+    return { reply: 'I can help arrange an appointment. Which doctor would you like to see?' };
+  }
+
+  private askForName(choice?: AppointmentChoice) {
+    if (!choice?.date || !choice.time) {
+      return { reply: 'Please choose an available appointment date and time, then tell me the patient’s name.' };
+    }
+    this.state.proposedDate = choice.date;
+    this.state.proposedTime = choice.time;
+    this.state.stage = 'collecting_name';
+    return { reply: `I can check ${this.state.doctorName} for ${formatDate(choice.date)} at ${choice.time}. What is the patient’s name?` };
+  }
+
+  private confirmationPrompt(choice?: AppointmentChoice) {
+    if (choice?.date && choice.time) {
+      this.state.proposedDate = choice.date;
+      this.state.proposedTime = choice.time;
+    }
+    if (!this.state.proposedDate || !this.state.proposedTime) {
+      this.state.stage = 'collecting_name';
+      return { reply: 'Please choose an available appointment date and time from the panel first.' };
+    }
+    this.state.stage = 'awaiting_confirmation';
+    return { reply: `Please confirm: ${this.state.patientName}, ${this.state.doctorName}, ${formatDate(this.state.proposedDate)} at ${this.state.proposedTime}. Should I book it?` };
+  }
+
+  private isAppointmentRequest(text: string): boolean {
+    return /appointment|doctor|mehta|sharma|verma|check.?up|book|visit|see someone|अपॉइंटमेंट|डॉक्टर|मुलाकात/iu.test(text);
   }
 
   private detectDoctor(text: string): void {
-    if (text.includes('sharma') || text.includes('ortho') || text.includes('haddi')) {
-      this.state.doctorName = 'Dr. Rajesh Sharma (Orthopedics)';
-    } else if (text.includes('verma') || text.includes('bacche') || text.includes('pediatric')) {
-      this.state.doctorName = 'Dr. Priya Verma (Pediatrics)';
-    } else {
-      this.state.doctorName = 'Dr. Ananya Mehta (General Medicine)';
-    }
+    if (/sharma|orthop|haddi|शर्मा/iu.test(text)) this.state.doctorName = 'Dr. Rajesh Sharma (Orthopedics)';
+    else if (/verma|pediatric|bacche|बच्चे|वर्मा/iu.test(text)) this.state.doctorName = 'Dr. Priya Verma (Pediatrics)';
+    else if (/mehta|general|मेहता/iu.test(text)) this.state.doctorName = 'Dr. Ananya Mehta (General Medicine)';
   }
 
-  private detectName(text: string): void {
-    const nameMatch = text.match(/(?:naam|name is|i am|mera naam|patient)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i);
-    if (nameMatch && nameMatch[1]) {
-      this.state.patientName = nameMatch[1].trim();
-    }
+  private extractName(text: string): string {
+    return text.match(namePattern)?.[1]?.trim() || '';
   }
 }
 
