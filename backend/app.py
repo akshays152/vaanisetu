@@ -24,7 +24,7 @@ ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID", "").strip()
 ELEVENLABS_SIGNED_URL_ENDPOINT = "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url"
 CORS_ORIGINS = [origin.strip() for origin in os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173",
+    "http://localhost:4000,http://127.0.0.1:4000,http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173",
 ).split(",") if origin.strip()]
 
 AVAILABLE_SLOTS = [
@@ -88,9 +88,16 @@ def initialize_db():
                 created_at TEXT NOT NULL
             );
 
-            CREATE UNIQUE INDEX IF NOT EXISTS confirmed_appointment_slot
-            ON appointments (date, time) WHERE status = 'confirmed';
         """)
+        # Existing local databases may contain duplicate confirmed bookings
+        # from before slot validation was added. Keep those records intact and
+        # rely on the serialized booking check below when the index cannot be
+        # installed on that legacy data.
+        try:
+            db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS confirmed_appointment_slot
+                        ON appointments (date, time) WHERE status = 'confirmed'""")
+        except sqlite3.IntegrityError:
+            pass
 
 
 @asynccontextmanager
